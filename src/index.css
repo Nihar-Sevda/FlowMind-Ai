@@ -9,9 +9,19 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
+html,
 body {
+  background-color: #faf9f5;
+  color: #27272a;
   font-family: var(--font-sans);
   @apply antialiased transition-colors duration-300;
+}
+
+html.dark,
+body.dark,
+.dark body {
+  background-color: #09090b;
+  color: #f4f4f5;
 }
 
 /* Custom scrollbars */

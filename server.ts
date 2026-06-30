@@ -434,6 +434,167 @@ app.post('/api/split-goal', async (req, res) => {
   }
 });
 
+// 3.75 Voice Dump (Audio-to-Action) Endpoint
+app.post('/api/voice-dump', async (req, res) => {
+  try {
+    const { transcript, lang } = req.body;
+    if (!transcript) {
+      return res.status(400).json({ error: 'Missing transcript for voice-dump processing' });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.log("Simulating high-fidelity voice dump extraction fallback...");
+      const isHi = lang === 'hi';
+      const todayStr = new Date().toISOString().split('T')[0];
+      const tomorrowStr = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+      const extractedTasks = [
+        {
+          title: isHi ? `डेटाबेस स्कीमा के बारे में सारा को ईमेल करें` : `Email Sarah about database schema`,
+          urgency: 'high',
+          duration: 15,
+          category: 'Work',
+          dueDate: tomorrowStr
+        },
+        {
+          title: isHi ? `शुक्रवार तक परिनियोजन (deployment) पूरा करें` : `Complete deployment by Friday`,
+          urgency: 'critical',
+          duration: 60,
+          category: 'Work',
+          dueDate: new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0]
+        }
+      ];
+      return res.json({ tasks: extractedTasks });
+    }
+
+    const ai = getGeminiClient();
+    const todayStr = new Date().toISOString().split('T')[0];
+    const systemPrompt = `You are a productivity structuring assistant. Take the raw, unstructured stream of consciousness, thoughts, or transcribed speech of a user. Extract all distinct actionable items, tasks, and to-dos mentioned. For each task, estimate:
+1. "title": A concise, clear task title.
+2. "urgency": Must be one of: 'critical', 'high', 'medium', 'low'.
+3. "duration": Estimated duration in minutes (integer, e.g. 15, 30, 45, 60).
+4. "category": Standard category (e.g. 'Work', 'Errand', 'Study', 'Health', 'Life').
+5. "dueDate": Specific deadline date in YYYY-MM-DD format based on context. Today's date is ${todayStr}.
+
+Ensure you write the task titles in the user's spoken language or English depending on their context. Return valid JSON only.`;
+
+    const prompt = `Unstructured thoughts: "${transcript}". Please extract actionable items. Return valid JSON matching the schema.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.5-flash',
+      contents: prompt,
+      config: {
+        systemInstruction: systemPrompt,
+        temperature: 0.5,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            tasks: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  urgency: { type: Type.STRING, description: "Must be one of: 'critical', 'high', 'medium', 'low'" },
+                  duration: { type: Type.INTEGER },
+                  category: { type: Type.STRING },
+                  dueDate: { type: Type.STRING, description: "Date in YYYY-MM-DD format" }
+                },
+                required: ["title", "urgency", "duration", "category"]
+              }
+            }
+          },
+          required: ["tasks"]
+        }
+      }
+    });
+
+    const parsed = JSON.parse((response.text || '{}').trim());
+    return res.json(parsed);
+
+  } catch (error: any) {
+    console.error('Error in voice-dump endpoint:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// 3.8 Live Interactive Companion Advice & Active Brainstorming
+app.post('/api/companion-advice', async (req, res) => {
+  try {
+    const { personalityId, personalityName, systemInstruction, tasks, lang } = req.body;
+    const isHi = lang === 'hi';
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.log("Simulating high-fidelity companion active advice fallback...");
+      
+      // Let's analyze the tasks to offer real contextual advice!
+      const pendingCount = Array.isArray(tasks) ? tasks.filter((t: any) => !t.completed).length : 0;
+      const criticalTasks = Array.isArray(tasks) ? tasks.filter((t: any) => !t.completed && (t.urgency === 'critical' || t.urgency === 'high')) : [];
+      
+      let fallbackText = "";
+
+      if (personalityId === 'mentor') {
+        fallbackText = isHi
+          ? `🌱 **नमस्ते दोस्त, मैं आपका सलाहकार हूँ।** आपके पास अभी ${pendingCount} लंबित कार्य हैं।\n\nविशेष रूप से, **"${criticalTasks[0]?.title || 'अपने मुख्य लक्ष्यों'}"** पर ध्यान दें। टालने की प्रवृत्ति प्राकृतिक है, लेकिन हम इसे छोटे-छोटे टुकड़ों में विभाजित करके और शांत दिमाग से काम करके दूर कर सकते हैं। \n\n*सलाह:* अपने सबसे महत्वपूर्ण कार्य के लिए एक 25 मिनट का केंद्रित सत्र शुरू करें। मैं आपके साथ हूँ!`
+          : `🌱 **Hello friend, your Mentor here.** I see you have ${pendingCount} pending task(s) on your plate.\n\nSpecifically, let's look at **"${criticalTasks[0]?.title || 'your core objectives'}"**. Feeling overwhelmed is natural, but we can navigate this using small, gentle milestones. \n\n*Actionable Advice:* Pick your top critical goal, slice it into 3 microscopic steps, and let's run a single, relaxed Pomodoro block. You are capable of wonderful focus.`;
+      } else if (personalityId === 'coach') {
+        fallbackText = isHi
+          ? `🔥 **चलो मैदान में उतरें!** आपके पास ${pendingCount} सक्रिय लक्ष्य हैं, और ${criticalTasks.length} अत्यधिक महत्वपूर्ण हैं।\n\n**"${criticalTasks[0]?.title || 'मुख्य कार्य'}"** को टालने का कोई बहाना नहीं चलेगा! हमारे पास समय कम है। \n\n*रणनीतिक योजना:* अभी पोमोडोरो टाइमर चालू करें, सभी सोशल मीडिया टैब बंद करें, और अगले 25 मिनट के लिए बिना रुके ध्यान केंद्रित करें। जब तक यह कार्य पूरा नहीं होता, तब तक पीछे नहीं हटना है!`
+          : `🔥 **Get in the zone! No excuses today.** You have ${pendingCount} active goals, and ${criticalTasks.length} are high-urgency threats.\n\nLet's tackle **"${criticalTasks[0]?.title || 'your main bottleneck'}"** head-on! \n\n*Execution Strategy:* Lock in, close all secondary browsers, trigger your timer right now, and give me 25 minutes of raw, uninterrupted execution. Procrastination ends when action begins. Let's crush this!`;
+      } else if (personalityId === 'philosopher') {
+        fallbackText = isHi
+          ? `🌌 **विचारशील उपस्थिति का क्षण।** आपके वर्तमान क्षेत्र में ${pendingCount} अधूरे कार्य उपस्थित हैं।\n\n**"${criticalTasks[0]?.title || 'अस्तित्ववादी चुनौतियों'}"** का दबाव हमें वर्तमान क्षण से विचलित करता है। \n\n*दार्शनिक चिंतन:* भविष्य के परिणामों की चिंता करने के बजाय, केवल कार्य करने की शुद्ध क्रिया पर ध्यान दें। समय केवल एक भ्रम है—वास्तविक शक्ति इसी वर्तमान क्षण (Now) में केंद्रित है। शांत रहें और एक सांस लें।`
+          : `🌌 **A moment of quiet contemplation.** There are ${pendingCount} unrealized intentions in your path.\n\nYour mind might be anxious about **"${criticalTasks[0]?.title || 'these worldly demands'}"**, but the burden is merely weightless anticipation.\n\n*Wisdom Accent:* Strip away the vanity of outcomes. Focus purely on the singular act of doing. Let go of the pressure to finish, and sink entirely into the process of starting. Breath in, breath out.`;
+      } else {
+        fallbackText = isHi
+          ? `🎨 **रचनात्मक विचार मंथन!** आपके क्षेत्र में ${pendingCount} लक्ष्य बिखरे हुए हैं।\n\nचलो **"${criticalTasks[0]?.title || 'इस रचनात्मक परियोजना'}"** को एक नया मोड़ देते हैं! \n\n*अपरंपरागत विचार:* इसे एक खेल की तरह खेलें। क्या आप इसे रिकॉर्ड समय में पूरा कर सकते हैं? इसे एक कलाकृति या पहेली की तरह समझें। लीक से हटकर सोचें और मजे करें!`
+          : `🎨 **Creative Brainstorm Unleashed!** You have ${pendingCount} fascinating canvases (tasks) waiting.\n\nLet's gamify **"${criticalTasks[0]?.title || 'this challenge'}"** to make it ridiculously fun!\n\n*Playful Shortcut:* Can you complete this under a self-imposed speedrun rule? Give yourself a silly reward, change your working environment, or sketch out your thoughts before typing. Let's make progress feel like play!`;
+      }
+
+      return res.json({ advice: fallbackText });
+    }
+
+    const ai = getGeminiClient();
+    
+    // Build context
+    const pendingTasksText = Array.isArray(tasks) && tasks.length > 0
+      ? tasks.map((t: any) => `- [${t.urgency.toUpperCase()}] ${t.title} (${t.category})`).join('\n')
+      : "No tasks active right now.";
+
+    const systemPrompt = `You are "${personalityName}" (${personalityId}), a highly interactive, hyper-focused productivity companion. Your tone is extremely distinct:
+- mentor: gentle, highly empathetic, therapeutic, focused on stress-reduction and mental health.
+- coach: ultra-intense, high-energy, direct, competitive, athletic, pushing back against procrastination with tough love.
+- philosopher: stoic, wise, deep, contemplative, poetic, discussing the present moment, time, and flow state.
+- creative: playful, erratic, full of out-of-the-box suggestions, gamifying productivity, using artistic metaphors.
+
+Analyze the user's current task list and provide a highly contextual, active brainstorm advice. Do NOT be generic. Directly reference their tasks. Speak directly to the user in ${isHi ? 'Hindi' : 'English'}. Include clear markdown bullet points, action ideas, and emotional pacing.`;
+
+    const prompt = `Here is my current state:
+Active tasks:
+${pendingTasksText}
+
+Please give me an interactive, tailored, and active brainstorm session of advice as my chosen companion. Address me directly with your personality style. Include a couple of fun, highly specific feature/action ideas I can try right now. Keep it around 150-200 words.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.5-flash',
+      contents: prompt,
+      config: {
+        systemInstruction: systemPrompt,
+        temperature: 0.85,
+      }
+    });
+
+    const advice = (response.text || '').trim();
+    return res.json({ advice });
+
+  } catch (error: any) {
+    console.error('Error in companion-advice endpoint:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 // 4. Vite middleware configuration or static hosting
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {

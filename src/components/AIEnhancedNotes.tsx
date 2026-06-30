@@ -11,7 +11,9 @@ import {
   FileText,
   Bookmark,
   PlusCircle,
-  HelpCircle
+  HelpCircle,
+  Mic,
+  MicOff
 } from 'lucide-react';
 import { QuickNote, Task, AIPersonality } from '../types';
 import { TranslationSet } from '../data/translations';
@@ -64,6 +66,112 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
     category: string;
   }[]>([]);
   const [successMsg, setSuccessMsg] = useState('');
+
+  // Voice Dump states
+  const [voiceDumpText, setVoiceDumpText] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const [isProcessingVoice, setIsProcessingVoice] = useState(false);
+  const [extractedFeedback, setExtractedFeedback] = useState('');
+  const recognitionRef = React.useRef<any>(null);
+
+  // Toggle speech recognition
+  const handleToggleRecording = () => {
+    if (isRecording) {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      setIsRecording(false);
+    } else {
+      // @ts-ignore
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        alert(lang === 'hi' ? "आपका ब्राउज़र वॉयस रिकग्निशन का समर्थन नहीं करता है। कृपया क्रोम या सफारी का उपयोग करें।" : "Your browser doesn't support live speech recognition. Feel free to type/paste your thoughts!");
+        return;
+      }
+
+      const rec = new SpeechRecognition();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = lang === 'hi' ? 'hi-IN' : 'en-US';
+
+      rec.onresult = (event: any) => {
+        let finalTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          }
+        }
+        if (finalTranscript) {
+          setVoiceDumpText(prev => prev ? prev + ' ' + finalTranscript : finalTranscript);
+        }
+      };
+
+      rec.onerror = (e: any) => {
+        console.error("Speech Recognition Error:", e);
+        setIsRecording(false);
+      };
+
+      rec.onend = () => {
+        setIsRecording(false);
+      };
+
+      recognitionRef.current = rec;
+      try {
+        rec.start();
+        setIsRecording(true);
+      } catch (e) {
+        console.error("Failed to start speech recognition:", e);
+      }
+    }
+  };
+
+  // Process transcript via `/api/voice-dump` backend endpoint
+  const handleProcessVoiceDump = async () => {
+    if (!voiceDumpText.trim()) return;
+
+    setIsProcessingVoice(true);
+    setExtractedFeedback('');
+    try {
+      const res = await fetch('/api/voice-dump', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          transcript: voiceDumpText,
+          lang
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to parse unstructured thoughts');
+      }
+
+      const data = await res.json();
+      if (data && data.tasks && data.tasks.length > 0) {
+        onAddMultipleTasks(data.tasks);
+        setExtractedFeedback(
+          lang === 'hi' 
+            ? `${data.tasks.length} नए कार्य सफलतापूर्व आपके प्लानर में जोड़े गए हैं!`
+            : `Added ${data.tasks.length} actionable tasks to your planner!`
+        );
+        setVoiceDumpText('');
+        // Auto-clear feedback after 5 seconds
+        setTimeout(() => setExtractedFeedback(''), 5000);
+      } else {
+        alert(lang === 'hi' ? "कोई कार्य नहीं मिला। कृपया अधिक स्पष्टता से बोलें।" : "Could not extract any tasks. Try being a bit more specific!");
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(lang === 'hi' ? "एआई विश्लेषण करने में विफल।" : "Failed to structure thoughts with Gemini. Please try again.");
+    } finally {
+      setIsProcessingVoice(false);
+    }
+  };
 
   // Sync notes to local storage
   useEffect(() => {
@@ -273,52 +381,150 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
       {activeSubTab === 'scratchpad' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
           
-          {/* Note Input Form */}
-          <div className="lg:col-span-1 p-5 rounded-3xl border border-zinc-200/80 dark:border-zinc-900 bg-white dark:bg-zinc-900/30 shadow-sm space-y-4">
-            <h3 className="font-display font-extrabold text-xs text-zinc-900 dark:text-zinc-150 uppercase tracking-wider font-mono">
-              {lang === 'hi' ? '✍️ नया नोट दर्ज करें' : '✍️ Create New Note'}
-            </h3>
+          {/* Left Column Stack */}
+          <div className="lg:col-span-1 space-y-6">
+            
+            {/* Note Input Form */}
+            <div className="p-5 rounded-3xl border border-zinc-200/80 dark:border-zinc-900 bg-white dark:bg-zinc-900/30 shadow-sm space-y-4">
+              <h3 className="font-display font-extrabold text-xs text-zinc-900 dark:text-zinc-150 uppercase tracking-wider font-mono">
+                {lang === 'hi' ? '✍️ नया नोट दर्ज करें' : '✍️ Create New Note'}
+              </h3>
 
-            <form onSubmit={handleSaveNote} className="space-y-3">
-              <div>
-                <input
-                  type="text"
-                  placeholder={t('noteTitlePlaceholder')}
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full px-3 py-2 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-400 text-zinc-800 dark:text-white"
-                />
+              <form onSubmit={handleSaveNote} className="space-y-3">
+                <div>
+                  <input
+                    type="text"
+                    placeholder={t('noteTitlePlaceholder')}
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    className="w-full px-3 py-2 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-400 text-zinc-800 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <input
+                    type="text"
+                    placeholder={t('noteTopicLabel')}
+                    value={newTopic}
+                    onChange={(e) => setNewTopic(e.target.value)}
+                    className="w-full px-3 py-2 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-400 text-zinc-800 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <textarea
+                    rows={6}
+                    placeholder={t('addNotePlaceholder')}
+                    value={newContent}
+                    onChange={(e) => setNewContent(e.target.value)}
+                    className="w-full p-3 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-400 text-zinc-800 dark:text-white resize-none"
+                    required
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                >
+                  <Plus className="w-4 h-4" />
+                  {t('saveNote')}
+                </button>
+              </form>
+            </div>
+
+            {/* Voice Dump (Audio-to-Action) panel */}
+            <div className="p-5 rounded-3xl border border-zinc-200/80 dark:border-zinc-900 bg-white dark:bg-zinc-900/30 shadow-sm space-y-4">
+              <div className="flex items-center gap-2">
+                <Mic className="w-4 h-4 text-indigo-500 animate-pulse" />
+                <h3 className="font-display font-extrabold text-xs text-zinc-900 dark:text-zinc-150 uppercase tracking-wider font-mono">
+                  {lang === 'hi' ? '🎙️ वॉयस डंप (ऑडियो-टू-एक्शन)' : '🎙️ Frictionless Voice Dump'}
+                </h3>
               </div>
+              
+              <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-sans leading-relaxed">
+                {lang === 'hi' 
+                  ? 'अपने अव्यवस्थित विचारों को बोलें या टाइप करें। एआई तुरंत महत्वपूर्ण कार्यों को निकालेगा और उन्हें योजनाकार में जोड़ देगा।' 
+                  : 'Speak or type your messy, unstructured thoughts. AI will instantly extract tasks, deadlines, and urgencies.'
+                }
+              </p>
 
-              <div>
-                <input
-                  type="text"
-                  placeholder={t('noteTopicLabel')}
-                  value={newTopic}
-                  onChange={(e) => setNewTopic(e.target.value)}
-                  className="w-full px-3 py-2 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-400 text-zinc-800 dark:text-white"
-                />
+              <div className="space-y-3">
+                {/* Recording State indicator or Input textarea */}
+                <div className="relative">
+                  <textarea
+                    rows={4}
+                    value={voiceDumpText}
+                    onChange={(e) => setVoiceDumpText(e.target.value)}
+                    placeholder={isRecording 
+                      ? (lang === 'hi' ? 'सुन रहा हूँ... बोलें...' : 'Listening... Speak your thoughts...') 
+                      : (lang === 'hi' ? 'जैसे: "मुझे शुक्रवार तक प्रोजेक्ट डिप्लॉय करना है, और कल सुबह सारा को ईमेल भेजना है..."' : 'e.g., "I need to finish the deployment by Friday, oh and I also need to email Sarah about the database schema tomorrow morning"')
+                    }
+                    className={`w-full p-3 text-xs bg-zinc-50 dark:bg-zinc-950 border rounded-xl focus:outline-none transition-all resize-none text-zinc-800 dark:text-white ${
+                      isRecording 
+                        ? 'border-rose-500 ring-2 ring-rose-500/10' 
+                        : 'border-zinc-200 dark:border-zinc-900 focus:border-indigo-500 dark:focus:border-indigo-400'
+                    }`}
+                    disabled={isProcessingVoice}
+                  />
+                  {isRecording && (
+                    <div className="absolute right-2.5 bottom-2.5 flex items-center gap-1.5 bg-rose-500 text-white px-1.5 py-0.5 rounded text-[8px] font-mono font-bold animate-pulse">
+                      REC
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  {/* Toggle recording button */}
+                  <button
+                    onClick={handleToggleRecording}
+                    disabled={isProcessingVoice}
+                    className={`flex-1 py-2 px-3 rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer border ${
+                      isRecording
+                        ? 'bg-rose-500 border-transparent text-white hover:bg-rose-600'
+                        : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-900 dark:hover:bg-zinc-850 text-zinc-700 dark:text-zinc-200 border-zinc-250 dark:border-zinc-800'
+                    }`}
+                  >
+                    {isRecording ? (
+                      <>
+                        <MicOff className="w-3 h-3 animate-bounce" />
+                        {lang === 'hi' ? 'रिकॉर्डिंग रोकें' : 'Stop Recording'}
+                      </>
+                    ) : (
+                      <>
+                        <Mic className="w-3 h-3 text-indigo-500" />
+                        {lang === 'hi' ? 'बोलना शुरू करें' : 'Record Audio'}
+                      </>
+                    )}
+                  </button>
+
+                  {/* Process button */}
+                  <button
+                    onClick={handleProcessVoiceDump}
+                    disabled={!voiceDumpText.trim() || isProcessingVoice || isRecording}
+                    className="px-3.5 py-2 bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 hover:bg-zinc-850 dark:hover:bg-zinc-100 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer border border-transparent"
+                  >
+                    {isProcessingVoice ? (
+                      <>
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        {lang === 'hi' ? 'प्रोसेसिंग...' : 'Structuring...'}
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3 h-3 text-amber-500" />
+                        {lang === 'hi' ? 'विश्लेषण' : 'Extract'}
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {extractedFeedback && (
+                  <div className="p-3 bg-emerald-50/40 dark:bg-emerald-950/10 border border-emerald-500/20 rounded-xl text-[10px] text-emerald-600 dark:text-emerald-400 font-sans leading-relaxed animate-in fade-in duration-250">
+                    🎉 <strong>{lang === 'hi' ? 'सफलता:' : 'Extracted:'}</strong> {extractedFeedback}
+                  </div>
+                )}
               </div>
+            </div>
 
-              <div>
-                <textarea
-                  rows={6}
-                  placeholder={t('addNotePlaceholder')}
-                  value={newContent}
-                  onChange={(e) => setNewContent(e.target.value)}
-                  className="w-full p-3 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-400 text-zinc-800 dark:text-white resize-none"
-                  required
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
-              >
-                <Plus className="w-4 h-4" />
-                {t('saveNote')}
-              </button>
-            </form>
           </div>
 
           {/* Notes list display */}

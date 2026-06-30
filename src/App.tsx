@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
+import { motion, AnimatePresence } from 'motion/react';
 import { synthManager } from './utils/audioSynth';
 import { AIPersonality, Task, TimerMode } from './types';
 import { AI_PERSONALITIES } from './data/personalities';
@@ -9,6 +10,7 @@ import CalendarDashboard from './components/CalendarDashboard';
 import AIOrbChat from './components/AIOrbChat';
 import AIEnhancedNotes from './components/AIEnhancedNotes';
 import RescueChart from './components/RescueChart';
+import EnergyBurnoutAnalytics from './components/EnergyBurnoutAnalytics';
 import { auth, googleSignIn, initAuth, logout, loginWithEmail, registerWithEmail } from './firebase';
 import { User } from 'firebase/auth';
 import { TRANSLATIONS, TranslationSet, TRANSLATE_URGENCY, USER_MODE_PREDICTIONS } from './data/translations';
@@ -40,10 +42,13 @@ import {
   CheckSquare,
   AlertTriangle,
   FileText,
+  Copy,
   CheckSquare2,
   CalendarDays,
   PlayCircle,
   Notebook,
+  ChevronLeft,
+  ChevronRight,
   HelpCircle as InfoIcon
 } from 'lucide-react';
 
@@ -78,6 +83,23 @@ export default function App() {
 
   // Active navigation tab
   const [activeTab, setActiveTab] = useState<'dashboard' | 'planner' | 'focus' | 'calendar' | 'notes'>( 'dashboard' );
+
+  // Sidebar collapsed state
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem('flowmind_sidebar_collapsed') === 'true';
+  });
+
+  // Active dynamic companion advice states
+  const [activeAdvice, setActiveAdvice] = useState<string>('');
+  const [loadingAdvice, setLoadingAdvice] = useState<boolean>(false);
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed(prev => {
+      const newVal = !prev;
+      localStorage.setItem('flowmind_sidebar_collapsed', String(newVal));
+      return newVal;
+    });
+  };
 
   // Task list state (persistent rescue targets)
   const [tasks, setTasks] = useState<Task[]>(() => {
@@ -205,6 +227,52 @@ export default function App() {
     );
     return () => unsubscribe();
   }, []);
+
+  // Toast notifications
+  const [activeToast, setActiveToast] = useState<{
+    id: string;
+    message: string;
+    onUndo?: () => void;
+  } | null>(null);
+
+  const showToast = (message: string, onUndo?: () => void) => {
+    const id = Math.random().toString();
+    setActiveToast({ id, message, onUndo });
+    setTimeout(() => {
+      setActiveToast(prev => prev?.id === id ? null : prev);
+    }, 5000);
+  };
+
+  // Zen Cooldown Day mode state
+  const [isZenCooldownActive, setIsZenCooldownActive] = useState<boolean>(() => {
+    return localStorage.getItem('flowmind_zen_cooldown') === 'true';
+  });
+
+  const handleToggleZenCooldown = (active: boolean) => {
+    setIsZenCooldownActive(active);
+    localStorage.setItem('flowmind_zen_cooldown', String(active));
+    if (active) {
+      showToast(lang === 'hi' ? "ध्यानपूर्ण शीतलन (Zen Cooldown) सक्रिय हुआ!" : "Zen Cooldown Rest Mode activated!", () => {
+        setIsZenCooldownActive(false);
+        localStorage.setItem('flowmind_zen_cooldown', 'false');
+      });
+    } else {
+      synthManager.stop();
+    }
+  };
+
+  // Keyboard shortcut: Esc to minimize / close modals
+  useEffect(() => {
+    const handleGlobalEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowQuizModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalEsc);
+    return () => {
+      window.removeEventListener('keydown', handleGlobalEsc);
+    };
+  }, [lang]);
 
   // 1. Sync theme class on mount/change
   useEffect(() => {
@@ -405,6 +473,7 @@ export default function App() {
     localStorage.setItem('flowmind_selected_personality_id', p.id);
     setIsOnboarding(false);
     setShowQuizModal(false);
+    setActiveAdvice('');
   };
 
   // 4. Task Planner Handlers
@@ -485,7 +554,18 @@ export default function App() {
   };
 
   const handleDeleteTask = (id: string) => {
+    const taskToDelete = tasks.find(t => t.id === id);
+    if (!taskToDelete) return;
+
     setTasks(prev => prev.filter(t => t.id !== id));
+
+    showToast(
+      lang === 'hi' ? `कार्य "${taskToDelete.title}" हटा दिया गया।` : `Deleted task "${taskToDelete.title}".`,
+      () => {
+        setTasks(prev => [...prev, taskToDelete]);
+        showToast(lang === 'hi' ? "कार्य पुनः स्थापित किया गया!" : "Task restored successfully!");
+      }
+    );
   };
 
   // 5. Trigger Real-time AI Triage through Backend API
@@ -690,6 +770,32 @@ export default function App() {
     }
   };
 
+  // Fetch live interactive AI companion active advice
+  const fetchCompanionAdvice = async () => {
+    setLoadingAdvice(true);
+    try {
+      const response = await fetch('/api/companion-advice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          personalityId: currentPersonality.id,
+          personalityName: currentPersonality.name,
+          systemInstruction: currentPersonality.systemInstruction,
+          tasks: tasks,
+          lang: lang
+        })
+      });
+      const data = await response.json();
+      if (data.advice) {
+        setActiveAdvice(data.advice);
+      }
+    } catch (err) {
+      console.error("Error fetching companion advice:", err);
+    } finally {
+      setLoadingAdvice(false);
+    }
+  };
+
   // AI Predictive Risk Engine Analytics Calculator
   const getRiskAssessment = () => {
     const pending = tasks.filter(t => !t.completed);
@@ -890,185 +996,271 @@ export default function App() {
       <div className="absolute bottom-0 left-0 w-[500px] h-[500px] rounded-full blur-[160px] opacity-5 pointer-events-none transition-all duration-1000 bg-indigo-500" />
 
       {/* 1. LEFT SIDEBAR NAVIGATION BAR (Responsive: sidebar on desktop, bottom bar on mobile) */}
-      <aside className="w-64 border-r border-zinc-200/80 dark:border-zinc-900 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md hidden md:flex flex-col fixed inset-y-0 left-0 z-30 transition-all">
+      <aside className={`${sidebarCollapsed ? 'w-20' : 'w-64'} border-r border-zinc-200/80 dark:border-zinc-900 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md hidden md:flex flex-col fixed inset-y-0 left-0 z-30 transition-all duration-300`}>
         
         {/* Top Logo */}
-        <div className="p-6 flex items-center gap-3 border-b border-zinc-100 dark:border-zinc-900">
-          <div className={`p-2 rounded-xl text-white shadow-lg bg-gradient-to-tr ${currentPersonality.bgGradientClass}`}>
-            <BrainCircuit className="w-5 h-5" />
+        <div className={`p-4 flex ${sidebarCollapsed ? 'flex-col gap-3 justify-center' : 'items-center justify-between'} border-b border-zinc-100 dark:border-zinc-900`}>
+          <div className="flex items-center gap-3">
+            <div className={`p-2 rounded-xl text-white shadow-lg bg-gradient-to-tr ${currentPersonality.bgGradientClass}`}>
+              <BrainCircuit className="w-5 h-5" />
+            </div>
+            {!sidebarCollapsed && (
+              <div>
+                <h1 className="font-display font-extrabold text-base tracking-tight text-zinc-900 dark:text-white flex items-center gap-1">
+                  FlowMind
+                  <span className="text-[8px] font-mono font-bold bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-500 px-1 py-0.5 rounded border border-zinc-200 dark:border-zinc-800">
+                    AI
+                  </span>
+                </h1>
+              </div>
+            )}
           </div>
-          <div>
-            <h1 className="font-display font-extrabold text-base tracking-tight text-zinc-900 dark:text-white flex items-center gap-1">
-              FlowMind
-              <span className="text-[8px] font-mono font-bold bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-500 px-1 py-0.5 rounded border border-zinc-200 dark:border-zinc-800">
-                AI
-              </span>
-            </h1>
-          </div>
+
+          <button
+            onClick={toggleSidebar}
+            className="p-1.5 rounded-xl border border-zinc-200 dark:border-zinc-850 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-500 dark:text-zinc-400 transition-all cursor-pointer shadow-sm bg-white dark:bg-zinc-950"
+            title={sidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+          >
+            {sidebarCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
+          </button>
         </div>
 
         {/* Selected Companion Snapshot Card */}
-        <div className="m-4 p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200/65 dark:border-zinc-850 flex items-center gap-3 relative overflow-hidden group">
-          <span className="text-3xl filter drop-shadow group-hover:scale-110 transition-transform">{currentPersonality.emoji}</span>
-          <div className="min-w-0">
-            <span className="text-[9px] uppercase font-mono font-extrabold text-zinc-400 dark:text-zinc-500 block">{t('activeCompanion')}</span>
-            <span className="text-xs font-display font-bold text-zinc-800 dark:text-zinc-200 truncate block">{currentPersonality.name}</span>
-            <span className="text-[10px] text-zinc-500 dark:text-zinc-400 italic truncate block">"{currentPersonality.tagline}"</span>
+        {sidebarCollapsed ? (
+          <div className="m-3 p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200/65 dark:border-zinc-850 flex items-center justify-center relative overflow-hidden group" title={`${currentPersonality.name}`}>
+            <span className="text-2xl filter drop-shadow group-hover:scale-110 transition-transform">{currentPersonality.emoji}</span>
+            <div className={`absolute bottom-0 right-0 left-0 h-0.5 bg-gradient-to-r ${currentPersonality.bgGradientClass}`} />
           </div>
-          <div className={`absolute bottom-0 right-0 top-0 w-0.5 bg-gradient-to-b ${currentPersonality.bgGradientClass}`} />
-        </div>
+        ) : (
+          <div className="m-4 p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200/65 dark:border-zinc-850 flex items-center gap-3 relative overflow-hidden group">
+            <span className="text-3xl filter drop-shadow group-hover:scale-110 transition-transform">{currentPersonality.emoji}</span>
+            <div className="min-w-0 flex-1">
+              <span className="text-xs font-display font-bold text-zinc-800 dark:text-zinc-200 block break-words">{currentPersonality.name}</span>
+            </div>
+            <div className={`absolute bottom-0 right-0 top-0 w-0.5 bg-gradient-to-b ${currentPersonality.bgGradientClass}`} />
+          </div>
+        )}
 
         {/* Main Navigation Links */}
         <nav className="flex-1 px-4 space-y-1.5 py-4">
           <button
             onClick={() => setActiveTab('dashboard')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium rounded-xl transition-all cursor-pointer ${
+            className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3.5 py-2.5'} text-xs font-medium rounded-xl transition-all cursor-pointer ${
               activeTab === 'dashboard'
                 ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-850 shadow-sm'
                 : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 hover:text-zinc-850 dark:hover:text-zinc-200'
             }`}
+            title={sidebarCollapsed ? t('workspaceOverview') : undefined}
           >
             <LayoutDashboard className="w-4 h-4 text-zinc-400" />
-            {t('workspaceOverview')}
+            {!sidebarCollapsed && <span>{t('workspaceOverview')}</span>}
           </button>
 
           <button
             onClick={() => setActiveTab('planner')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium rounded-xl transition-all cursor-pointer ${
+            className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3.5 py-2.5'} text-xs font-medium rounded-xl transition-all cursor-pointer ${
               activeTab === 'planner'
                 ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-850 shadow-sm'
                 : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 hover:text-zinc-850 dark:hover:text-zinc-200'
             }`}
+            title={sidebarCollapsed ? t('deadlinePlanner') : undefined}
           >
             <ShieldAlert className="w-4 h-4 text-rose-400" />
-            {t('deadlinePlanner')}
-            {tasks.filter(t => !t.completed && t.urgency === 'critical').length > 0 && (
+            {!sidebarCollapsed && <span>{t('deadlinePlanner')}</span>}
+            {!sidebarCollapsed && tasks.filter(t => !t.completed && t.urgency === 'critical').length > 0 && (
               <span className="ml-auto w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+            )}
+            {sidebarCollapsed && tasks.filter(t => !t.completed && t.urgency === 'critical').length > 0 && (
+              <span className="absolute top-2 right-4 w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
             )}
           </button>
 
           <button
             onClick={() => setActiveTab('focus')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium rounded-xl transition-all cursor-pointer ${
+            className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3.5 py-2.5'} text-xs font-medium rounded-xl transition-all cursor-pointer ${
               activeTab === 'focus'
                 ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-850 shadow-sm'
                 : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 hover:text-zinc-850 dark:hover:text-zinc-200'
             }`}
+            title={sidebarCollapsed ? t('focusSpace') : undefined}
           >
             <Flame className="w-4 h-4 text-amber-500 animate-pulse" />
-            {t('focusSpace')}
+            {!sidebarCollapsed && <span>{t('focusSpace')}</span>}
           </button>
 
           <button
             onClick={() => setActiveTab('calendar')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium rounded-xl transition-all cursor-pointer ${
+            className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3.5 py-2.5'} text-xs font-medium rounded-xl transition-all cursor-pointer ${
               activeTab === 'calendar'
                 ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-850 shadow-sm'
                 : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 hover:text-zinc-850 dark:hover:text-zinc-200'
             }`}
+            title={sidebarCollapsed ? t('calendarTimeline') : undefined}
           >
             <Calendar className="w-4 h-4 text-indigo-400" />
-            {t('calendarTimeline')}
+            {!sidebarCollapsed && <span>{t('calendarTimeline')}</span>}
           </button>
 
           <button
             onClick={() => setActiveTab('notes')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium rounded-xl transition-all cursor-pointer ${
+            className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3.5 py-2.5'} text-xs font-medium rounded-xl transition-all cursor-pointer ${
               activeTab === 'notes'
                 ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-850 shadow-sm'
                 : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 hover:text-zinc-850 dark:hover:text-zinc-200'
             }`}
+            title={sidebarCollapsed ? t('quickNotes') : undefined}
           >
             <Notebook className="w-4 h-4 text-emerald-400" />
-            {t('quickNotes')}
+            {!sidebarCollapsed && <span>{t('quickNotes')}</span>}
           </button>
         </nav>
 
         {/* Sidebar Footer Controls */}
-        <div className="p-4 border-t border-zinc-100 dark:border-zinc-900 space-y-2">
+        <div className={`p-4 border-t border-zinc-100 dark:border-zinc-900 ${sidebarCollapsed ? 'space-y-3' : 'space-y-2'}`}>
           
-          <button
-            onClick={() => setShowQuizModal(true)}
-            className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-850 text-zinc-600 dark:text-zinc-300 rounded-xl border border-zinc-200 dark:border-zinc-800 text-[11px] transition-all cursor-pointer font-sans font-semibold"
-          >
-            <Compass className="w-3.5 h-3.5 text-indigo-400" />
-            {t('changeCompanionQuiz')}
-          </button>
+          {sidebarCollapsed ? (
+            <div className="flex flex-col items-center gap-3">
+              <button
+                onClick={() => setShowQuizModal(true)}
+                className="p-2 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-850 text-zinc-600 dark:text-zinc-300 rounded-xl border border-zinc-200 dark:border-zinc-800 transition-all cursor-pointer shadow-sm"
+                title={t('changeCompanionQuiz')}
+              >
+                <Compass className="w-4 h-4 text-indigo-400" />
+              </button>
 
-          <div className="flex items-center justify-between p-1 bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl">
-            <span className="text-[10px] text-zinc-500 pl-2 font-mono flex items-center gap-1.5">
-              <Languages className="w-3.5 h-3.5 text-indigo-500" />
-              Language / भाषा
-            </span>
-            <button
-              onClick={() => setLang(lang === 'en' ? 'hi' : 'en')}
-              className="px-2 py-0.5 text-[9px] font-mono font-bold bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 border border-zinc-250 dark:border-zinc-800 rounded-lg transition-all cursor-pointer shadow-sm"
-            >
-              {lang === 'en' ? 'EN' : 'हिं'}
-            </button>
-          </div>
+              <button
+                onClick={() => setLang(lang === 'en' ? 'hi' : 'en')}
+                className="w-8 h-8 flex items-center justify-center text-[10px] font-mono font-bold bg-zinc-100 dark:bg-zinc-950 text-indigo-600 dark:text-indigo-400 border border-zinc-200 dark:border-zinc-900 rounded-xl transition-all cursor-pointer shadow-sm"
+                title="Change Language / भाषा बदलें"
+              >
+                {lang === 'en' ? 'EN' : 'हिं'}
+              </button>
 
-          <div className="flex items-center justify-between p-1 bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl">
-            <span className="text-[10px] text-zinc-500 pl-2 font-mono">{t('darkMode')}</span>
-            <button
-              onClick={() => setDarkMode(!darkMode)}
-              className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg transition-all"
-            >
-              {darkMode ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
-            </button>
-          </div>
+              <button
+                onClick={() => setDarkMode(!darkMode)}
+                className="p-2 bg-zinc-100 dark:bg-zinc-950 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-xl border border-zinc-200 dark:border-zinc-900 transition-all cursor-pointer"
+                title={t('darkMode')}
+              >
+                {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </button>
 
-          <button
-            onClick={requestNotificationPermission}
-            className="w-full flex items-center justify-between p-1 px-2 bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl hover:bg-zinc-200 dark:hover:bg-zinc-900 transition-all cursor-pointer"
-          >
-            <span className="text-[10px] text-zinc-500 font-mono flex items-center gap-1.5">
-              {notificationsEnabled ? (
-                <Bell className="w-3.5 h-3.5 text-emerald-500" />
-              ) : (
-                <BellOff className="w-3.5 h-3.5 text-zinc-400" />
-              )}
-              {t('enableReminders')}
-            </span>
-            <span className={`text-[8px] font-mono font-bold px-1.5 py-0.5 rounded ${
-              notificationsEnabled ? 'bg-emerald-500/10 text-emerald-500' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500'
-            }`}>
-              {notificationsEnabled ? 'ON' : 'OFF'}
-            </span>
-          </button>
+              <button
+                onClick={requestNotificationPermission}
+                className="p-2 bg-zinc-100 dark:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-900 transition-all cursor-pointer"
+                title={t('enableReminders')}
+              >
+                {notificationsEnabled ? (
+                  <Bell className="w-4 h-4 text-emerald-500" />
+                ) : (
+                  <BellOff className="w-4 h-4 text-zinc-400" />
+                )}
+              </button>
+            </div>
+          ) : (
+            <>
+              <button
+                onClick={() => setShowQuizModal(true)}
+                className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-850 text-zinc-600 dark:text-zinc-300 rounded-xl border border-zinc-200 dark:border-zinc-800 text-[11px] transition-all cursor-pointer font-sans font-semibold"
+              >
+                <Compass className="w-3.5 h-3.5 text-indigo-400" />
+                {t('changeCompanionQuiz')}
+              </button>
+
+              <div className="flex items-center justify-between p-1 bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl">
+                <span className="text-[10px] text-zinc-500 pl-2 font-mono flex items-center gap-1.5">
+                  <Languages className="w-3.5 h-3.5 text-indigo-500" />
+                  Language / भाषा
+                </span>
+                <button
+                  onClick={() => setLang(lang === 'en' ? 'hi' : 'en')}
+                  className="px-2 py-0.5 text-[9px] font-mono font-bold bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 border border-zinc-250 dark:border-zinc-800 rounded-lg transition-all cursor-pointer shadow-sm"
+                >
+                  {lang === 'en' ? 'EN' : 'हिं'}
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-1 bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl">
+                <span className="text-[10px] text-zinc-500 pl-2 font-mono">{t('darkMode')}</span>
+                <button
+                  onClick={() => setDarkMode(!darkMode)}
+                  className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg transition-all"
+                >
+                  {darkMode ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+
+              <button
+                onClick={requestNotificationPermission}
+                className="w-full flex items-center justify-between p-1 px-2 bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl hover:bg-zinc-200 dark:hover:bg-zinc-900 transition-all cursor-pointer"
+              >
+                <span className="text-[10px] text-zinc-500 font-mono flex items-center gap-1.5">
+                  {notificationsEnabled ? (
+                    <Bell className="w-3.5 h-3.5 text-emerald-500" />
+                  ) : (
+                    <BellOff className="w-3.5 h-3.5 text-zinc-400" />
+                  )}
+                  {t('enableReminders')}
+                </span>
+                <span className={`text-[8px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                  notificationsEnabled ? 'bg-emerald-500/10 text-emerald-500' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500'
+                }`}>
+                  {notificationsEnabled ? 'ON' : 'OFF'}
+                </span>
+              </button>
+            </>
+          )}
 
           <div className="text-center pt-2 border-t border-zinc-100 dark:border-zinc-900/60 mt-2">
-            <a 
-              href="mailto:niharsevda04@gmail.com" 
-              className="text-[9px] font-mono text-zinc-400 dark:text-zinc-500 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors"
-            >
-              {t('createdBy')}
-            </a>
+            {!sidebarCollapsed ? (
+              <a 
+                href="mailto:niharsevda04@gmail.com" 
+                className="text-[9px] font-mono text-zinc-400 dark:text-zinc-500 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors"
+              >
+                {t('createdBy')}
+              </a>
+            ) : (
+              <span className="text-[9px] font-mono text-zinc-400">FM</span>
+            )}
           </div>
 
           {currentUser && (
-            <div className="flex items-center gap-2 p-2 border-t border-zinc-100 dark:border-zinc-900/60 mt-2">
-              {currentUser.photoURL ? (
-                <img src={currentUser.photoURL} alt={currentUser.displayName || ''} className="w-6 h-6 rounded-full border border-zinc-300 dark:border-zinc-750" referrerPolicy="no-referrer" />
-              ) : (
-                <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-[10px] uppercase shadow-sm">
-                  {currentUser.email?.charAt(0) || 'U'}
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <p className="text-[10px] font-medium text-zinc-800 dark:text-zinc-200 truncate">{currentUser.displayName || currentUser.email?.split('@')[0]}</p>
-                <p className="text-[8px] text-zinc-400 dark:text-zinc-500 truncate">{currentUser.email}</p>
+            sidebarCollapsed ? (
+              <div className="flex flex-col items-center gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-900/60 mt-2">
+                {currentUser.photoURL ? (
+                  <img src={currentUser.photoURL} alt={currentUser.displayName || ''} className="w-7 h-7 rounded-full border border-zinc-300 dark:border-zinc-750" referrerPolicy="no-referrer" title={currentUser.displayName || currentUser.email || ''} />
+                ) : (
+                  <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-[10px] uppercase shadow-sm" title={currentUser.displayName || currentUser.email || ''}>
+                    {currentUser.email?.charAt(0) || 'U'}
+                  </div>
+                )}
+                <button onClick={handleLogout} className="p-1 text-zinc-400 hover:text-rose-500 rounded-lg transition-all cursor-pointer" title="Sign Out">
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
               </div>
-              <button onClick={handleLogout} className="p-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-zinc-400 hover:text-rose-500 rounded-lg transition-all cursor-pointer" title="Sign Out">
-                <LogOut className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            ) : (
+              <div className="flex items-center gap-2 p-2 border-t border-zinc-100 dark:border-zinc-900/60 mt-2">
+                {currentUser.photoURL ? (
+                  <img src={currentUser.photoURL} alt={currentUser.displayName || ''} className="w-6 h-6 rounded-full border border-zinc-300 dark:border-zinc-750" referrerPolicy="no-referrer" />
+                ) : (
+                  <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-[10px] uppercase shadow-sm">
+                    {currentUser.email?.charAt(0) || 'U'}
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-medium text-zinc-800 dark:text-zinc-200 truncate">{currentUser.displayName || currentUser.email?.split('@')[0]}</p>
+                  <p className="text-[8px] text-zinc-400 dark:text-zinc-500 truncate">{currentUser.email}</p>
+                </div>
+                <button onClick={handleLogout} className="p-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-zinc-400 hover:text-rose-500 rounded-lg transition-all cursor-pointer" title="Sign Out">
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )
           )}
         </div>
       </aside>
 
       {/* Desktop sidebar spacer */}
-      <div className="hidden md:block w-64 flex-shrink-0" />
+      <div className={`hidden md:block ${sidebarCollapsed ? 'w-20' : 'w-64'} flex-shrink-0 transition-all duration-300`} />
 
       {/* Main Container */}
       <div className="flex-1 flex flex-col min-h-screen">
@@ -1104,7 +1296,9 @@ export default function App() {
               </div>
             )}
 
-            <div className="text-right hidden sm:block">
+
+
+            <div className="text-right hidden md:block">
               <span className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider block">Crisis Triage Clock</span>
               <span className="text-xs text-zinc-800 dark:text-zinc-300 font-mono font-bold">{currentTime || 'Locked...'}</span>
             </div>
@@ -1189,31 +1383,77 @@ export default function App() {
                 <div className="space-y-6 animate-in fade-in duration-200">
                   
                   {/* Proactive Guardian Banner */}
-                  <div className={`p-5 rounded-3xl border border-zinc-200/80 dark:border-zinc-900 bg-white/60 dark:bg-zinc-900/20 shadow-sm dark:shadow-inner relative overflow-hidden transition-all duration-300 flex flex-col md:flex-row gap-5 items-start sm:items-center justify-between`}>
-                    <div className="flex items-center gap-4">
-                      <span className="text-5xl filter drop-shadow animate-bounce" style={{ animationDuration: '4s' }}>
-                        {currentPersonality.emoji}
-                      </span>
-                      <div>
-                        <span className="text-[9px] uppercase tracking-widest text-zinc-500 font-mono font-bold block mb-0.5">
-                          Personal Proactive Insight
+                  <div className="flex flex-col gap-4">
+                    <div className={`p-5 rounded-3xl border border-zinc-200/80 dark:border-zinc-900 bg-white/60 dark:bg-zinc-900/20 shadow-sm dark:shadow-inner relative overflow-hidden transition-all duration-300 flex flex-col md:flex-row gap-5 items-start sm:items-center justify-between`}>
+                      <div className="flex items-center gap-4 flex-1">
+                        <span className="text-5xl filter drop-shadow animate-bounce shrink-0" style={{ animationDuration: '4s' }}>
+                          {currentPersonality.emoji}
                         </span>
-                        <h2 className="font-display font-extrabold text-base text-zinc-900 dark:text-zinc-100 mb-1">
-                          {currentPersonality.name} suggests:
-                        </h2>
-                        <p className="text-xs text-zinc-600 dark:text-zinc-400 font-sans leading-relaxed max-w-xl">
-                          {getCompanionProactiveAdvice()}
-                        </p>
+                        <div>
+                          <span className="text-[9px] uppercase tracking-widest text-zinc-500 font-mono font-bold block mb-0.5">
+                            Personal Proactive Insight
+                          </span>
+                          <h2 className="font-display font-extrabold text-base text-zinc-900 dark:text-zinc-100 mb-1">
+                            {currentPersonality.name} suggests:
+                          </h2>
+                          <p className="text-xs text-zinc-600 dark:text-zinc-400 font-sans leading-relaxed max-w-xl">
+                            {getCompanionProactiveAdvice()}
+                          </p>
+                          
+                          {/* Live Dynamic Advice Button Trigger */}
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <button
+                              onClick={fetchCompanionAdvice}
+                              disabled={loadingAdvice}
+                              className="px-3 py-1.5 bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-850 text-zinc-800 dark:text-zinc-200 text-[11px] font-semibold rounded-lg border border-zinc-200/60 dark:border-zinc-800/80 transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer shadow-sm"
+                            >
+                              <Sparkles className={`w-3.5 h-3.5 text-indigo-500 ${loadingAdvice ? 'animate-spin' : ''}`} />
+                              {loadingAdvice 
+                                ? (lang === 'hi' ? 'सलाह विचार-मंथन जारी है...' : 'Brainstorming Active Advice...') 
+                                : activeAdvice 
+                                  ? (lang === 'hi' ? '🧠 फिर से विचार-मंथन करें' : '🧠 Brainstorm New Action Plan')
+                                  : (lang === 'hi' ? '💡 कस्टम कार्य योजना विचार-मंथन' : '💡 Live Tactical Brainstorm Session')
+                              }
+                            </button>
+                            {activeAdvice && (
+                              <button
+                                onClick={() => setActiveAdvice('')}
+                                className="px-3 py-1.5 text-[11px] text-zinc-500 hover:text-zinc-850 dark:hover:text-zinc-200 font-semibold cursor-pointer"
+                              >
+                                {lang === 'hi' ? 'छुपाएं' : 'Reset / Hide'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
                       </div>
+
+                      <button
+                        onClick={() => setActiveTab('planner')}
+                        className={`px-4 py-2 rounded-xl text-xs font-semibold text-white transition-all flex items-center gap-1.5 cursor-pointer self-stretch md:self-auto justify-center ${accentColor}`}
+                      >
+                        <ShieldAlert className="w-3.5 h-3.5" />
+                        Triage Planner
+                      </button>
                     </div>
 
-                    <button
-                      onClick={() => setActiveTab('planner')}
-                      className={`px-4 py-2 rounded-xl text-xs font-semibold text-white transition-all flex items-center gap-1.5 cursor-pointer ${accentColor}`}
-                    >
-                      <ShieldAlert className="w-3.5 h-3.5" />
-                      Triage Planner
-                    </button>
+                    {/* Active Brainstorm Display Section */}
+                    {activeAdvice && (
+                      <div className="p-5 rounded-3xl border border-indigo-500/10 dark:border-indigo-500/25 bg-gradient-to-r from-indigo-500/5 to-purple-500/5 dark:from-indigo-500/10 dark:to-purple-500/10 shadow-lg relative overflow-hidden transition-all duration-300 animate-in slide-in-from-top-4">
+                        <div className="flex items-start gap-3.5">
+                          <div className={`p-2 rounded-xl text-white shadow-md bg-gradient-to-tr ${currentPersonality.bgGradientClass} shrink-0`}>
+                            <Sparkles className="w-4 h-4" />
+                          </div>
+                          <div className="flex-1">
+                            <span className="text-[9px] uppercase tracking-wider font-mono font-extrabold text-indigo-500 dark:text-indigo-400 block mb-1">
+                              {currentPersonality.name}'s Custom Active Brainstorm Session
+                            </span>
+                            <div className="text-xs text-zinc-700 dark:text-zinc-300 font-sans leading-relaxed whitespace-pre-line prose prose-zinc dark:prose-invert">
+                              {activeAdvice}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Micro stats dashboard row */}
@@ -1310,6 +1550,16 @@ export default function App() {
                       </div>
                     );
                   })()}
+
+                  {/* Energy & Burnout Analytics section */}
+                  <EnergyBurnoutAnalytics
+                    lang={lang}
+                    tasks={tasks}
+                    completedPomodoros={completedPomodoros}
+                    currentPersonality={currentPersonality}
+                    onActivateZenCooldown={handleToggleZenCooldown}
+                    isZenCooldownActive={isZenCooldownActive}
+                  />
 
                   {/* Core layout grid */}
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1455,172 +1705,181 @@ export default function App() {
                               </p>
                             </div>
                           ) : (
-                            displayedTasks.map((task) => {
-                              const targetSteps = completedSurvivalSteps[task.id] || {};
-                              const stepCount = task.survivalPlan?.length || 0;
-                              const completedCount = Object.values(targetSteps).filter(Boolean).length;
+                            <div className="space-y-4">
+                              <AnimatePresence mode="popLayout">
+                                {displayedTasks.map((task, index) => {
+                                  const targetSteps = completedSurvivalSteps[task.id] || {};
+                                  const stepCount = task.survivalPlan?.length || 0;
+                                  const completedCount = Object.values(targetSteps).filter(Boolean).length;
 
-                              return (
-                                <div
-                                  key={task.id}
-                                  className={`p-5 rounded-3xl border transition-all relative overflow-hidden bg-white dark:bg-zinc-900/30 border-zinc-200/80 dark:border-zinc-900 shadow-sm dark:shadow-none ${
-                                    task.completed ? 'opacity-60 saturate-50' : ''
-                                  }`}
-                                >
-                                  {/* Decorative color tag */}
-                                  <div className={`absolute top-0 bottom-0 left-0 w-1 ${
-                                    task.urgency === 'critical' ? 'bg-rose-500' 
-                                      : task.urgency === 'high' ? 'bg-amber-500' 
-                                      : task.urgency === 'medium' ? 'bg-indigo-500' 
-                                      : 'bg-emerald-500'
-                                  }`} />
+                                  return (
+                                    <motion.div
+                                      key={task.id}
+                                      layout
+                                      initial={{ opacity: 0, y: 15 }}
+                                      animate={{ opacity: 1, y: 0 }}
+                                      exit={{ opacity: 0, scale: 0.95 }}
+                                      transition={{ duration: 0.25, delay: index * 0.05 }}
+                                      className={`p-5 rounded-3xl border transition-all relative overflow-hidden bg-white dark:bg-zinc-900/30 border-zinc-200/80 dark:border-zinc-900 shadow-sm dark:shadow-none ${
+                                        task.completed ? 'opacity-60 saturate-50' : ''
+                                      }`}
+                                    >
+                                      {/* Decorative color tag */}
+                                      <div className={`absolute top-0 bottom-0 left-0 w-1 ${
+                                        task.urgency === 'critical' ? 'bg-rose-500' 
+                                          : task.urgency === 'high' ? 'bg-amber-500' 
+                                          : task.urgency === 'medium' ? 'bg-indigo-500' 
+                                          : 'bg-emerald-500'
+                                      }`} />
 
-                                  <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-                                    <div className="flex items-start gap-3.5">
-                                      {/* Toggle master complete */}
-                                      <button
-                                        onClick={() => handleToggleTask(task.id)}
-                                        className="mt-0.5 text-zinc-500 hover:text-indigo-400 transition-colors cursor-pointer"
-                                      >
-                                        {task.completed ? (
-                                          <CheckCircle2 className="w-5 h-5 text-indigo-500 fill-indigo-500/10" />
-                                        ) : (
-                                          <Circle className="w-5 h-5 text-zinc-400 dark:text-zinc-700 hover:text-zinc-600 dark:hover:text-zinc-500" />
-                                        )}
-                                      </button>
-
-                                      <div className="space-y-1">
-                                        <h4 className={`font-display font-bold text-sm text-zinc-800 dark:text-zinc-200 ${task.completed ? 'line-through text-zinc-400 dark:text-zinc-500' : ''}`}>
-                                          {task.title}
-                                        </h4>
-                                        
-                                        <div className="flex flex-wrap items-center gap-2">
-                                          <span className="text-[10px] font-mono bg-zinc-100 dark:bg-zinc-950 px-2 py-0.5 rounded text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-900">
-                                            {task.category}
-                                          </span>
-                                          <span className="text-[10px] font-mono text-zinc-500 flex items-center gap-1">
-                                            <Clock className="w-3 h-3 text-zinc-400 dark:text-zinc-600" />
-                                            {getDaysRemainingText(task.dueDate)}
-                                          </span>
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                    {/* Task Action items */}
-                                    <div className="flex flex-wrap gap-2 self-start md:self-auto pl-8 md:pl-0">
-                                      <button
-                                        onClick={() => handleLaunchFocusForTask(task)}
-                                        className="px-2.5 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl text-[10px] text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white transition-all flex items-center gap-1 cursor-pointer"
-                                        title="Import to active focus timer session"
-                                      >
-                                        <PlayCircle className="w-3.5 h-3.5 text-amber-500" />
-                                        Focus Lock
-                                      </button>
-
-                                      <button
-                                        onClick={() => handleSyncTaskToCalendar(task)}
-                                        className={`px-2.5 py-1.5 border rounded-xl text-[10px] transition-all flex items-center gap-1 cursor-pointer ${
-                                          task.calendarSynced 
-                                            ? 'bg-emerald-50 dark:bg-emerald-500/5 border-emerald-200 dark:border-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-semibold' 
-                                            : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white'
-                                        }`}
-                                      >
-                                        <CalendarDays className="w-3.5 h-3.5 text-indigo-400" />
-                                        {task.calendarSynced ? 'Synced Schedule' : 'Schedule Sync'}
-                                      </button>
-
-                                      <button
-                                        onClick={() => handleDeleteTask(task.id)}
-                                        className="p-1.5 bg-zinc-50 dark:bg-zinc-950 hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400 border border-zinc-200 dark:border-zinc-900 rounded-xl transition-all cursor-pointer"
-                                        title="Remove target"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5 text-zinc-500" />
-                                      </button>
-                                    </div>
-                                  </div>
-
-                                  {/* AI Triage Display block */}
-                                  <div className="mt-4 border-t border-zinc-100 dark:border-zinc-900/60 pt-4 pl-8">
-                                    {!task.survivalPlan ? (
-                                      <div className="flex items-center justify-between gap-4">
-                                        <p className="text-[11px] text-zinc-500">
-                                          No tactical plan generated yet. Let your AI Companion analyze this target.
-                                        </p>
-                                        <button
-                                          onClick={() => handleAITriageTask(task)}
-                                          disabled={triagingTaskId === task.id}
-                                          className="px-3.5 py-1.5 bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/20 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 rounded-xl transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                                        >
-                                          <Bot className="w-3.5 h-3.5" />
-                                          {triagingTaskId === task.id ? 'Analyzing threat...' : 'AI Triage Target'}
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <div className="space-y-3 animate-in fade-in duration-200">
-                                        <div className="flex items-center justify-between gap-3">
-                                          <div className="flex items-center gap-1.5">
-                                            <span className="text-xs">🤖</span>
-                                            <p className="text-[10px] font-mono font-bold text-zinc-500 dark:text-zinc-400">
-                                              Triage Status:{' '}
-                                              <span className={`text-[9px] px-1.5 py-0.5 rounded ${
-                                                task.triagePriority === 'CRITICAL RESCUE' ? 'bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-500/20 font-bold' : 'bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-500/20 font-bold'
-                                              }`}>
-                                                {task.triagePriority}
-                                              </span>
-                                            </p>
-                                          </div>
+                                      <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                                        <div className="flex items-start gap-3.5">
+                                          {/* Toggle master complete */}
                                           <button
-                                            onClick={() => handleAITriageTask(task)}
-                                            className="text-[9px] font-mono text-zinc-500 hover:text-zinc-800 dark:hover:text-white flex items-center gap-1 cursor-pointer"
-                                            title="Re-run triage content"
+                                            onClick={() => handleToggleTask(task.id)}
+                                            className="mt-0.5 text-zinc-500 hover:text-indigo-400 transition-colors cursor-pointer"
                                           >
-                                            <RefreshCw className="w-2.5 h-2.5" />
-                                            Re-triage
+                                            {task.completed ? (
+                                              <CheckCircle2 className="w-5 h-5 text-indigo-500 fill-indigo-500/10" />
+                                            ) : (
+                                              <Circle className="w-5 h-5 text-zinc-400 dark:text-zinc-700 hover:text-zinc-600 dark:hover:text-zinc-500" />
+                                            )}
+                                          </button>
+
+                                          <div className="space-y-1">
+                                            <h4 className={`font-display font-bold text-sm text-zinc-800 dark:text-zinc-200 ${task.completed ? 'line-through text-zinc-400 dark:text-zinc-500' : ''}`}>
+                                              {task.title}
+                                            </h4>
+                                            
+                                            <div className="flex flex-wrap items-center gap-2">
+                                              <span className="text-[10px] font-mono bg-zinc-100 dark:bg-zinc-950 px-2 py-0.5 rounded text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-900">
+                                                {task.category}
+                                              </span>
+                                              <span className="text-[10px] font-mono text-zinc-500 flex items-center gap-1">
+                                                <Clock className="w-3 h-3 text-zinc-400 dark:text-zinc-600" />
+                                                {getDaysRemainingText(task.dueDate)}
+                                              </span>
+                                            </div>
+                                          </div>
+                                        </div>
+
+                                        {/* Task Action items */}
+                                        <div className="flex flex-wrap gap-2 self-start md:self-auto pl-8 md:pl-0">
+                                          <button
+                                            onClick={() => handleLaunchFocusForTask(task)}
+                                            className="px-2.5 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl text-[10px] text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white transition-all flex items-center gap-1 cursor-pointer"
+                                            title="Import to active focus timer session"
+                                          >
+                                            <PlayCircle className="w-3.5 h-3.5 text-amber-500" />
+                                            Focus Lock
+                                          </button>
+
+                                          <button
+                                            onClick={() => handleSyncTaskToCalendar(task)}
+                                            className={`px-2.5 py-1.5 border rounded-xl text-[10px] transition-all flex items-center gap-1 cursor-pointer ${
+                                              task.calendarSynced 
+                                                ? 'bg-emerald-50 dark:bg-emerald-500/5 border-emerald-200 dark:border-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-semibold' 
+                                                : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white'
+                                            }`}
+                                          >
+                                            <CalendarDays className="w-3.5 h-3.5 text-indigo-400" />
+                                            {task.calendarSynced ? 'Synced Schedule' : 'Schedule Sync'}
+                                          </button>
+
+                                          <button
+                                            onClick={() => handleDeleteTask(task.id)}
+                                            className="p-1.5 bg-zinc-50 dark:bg-zinc-950 hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400 border border-zinc-200 dark:border-zinc-900 rounded-xl transition-all cursor-pointer"
+                                            title="Remove target"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5 text-zinc-500" />
                                           </button>
                                         </div>
-
-                                        <div className="p-3 bg-zinc-50/60 dark:bg-zinc-950 border border-zinc-200/60 dark:border-zinc-900 rounded-2xl">
-                                          <p className="text-[11px] text-zinc-700 dark:text-zinc-300 font-sans leading-relaxed mb-2.5 flex items-start gap-1">
-                                            <InfoIcon className="w-3 h-3 text-zinc-400 dark:text-zinc-500 flex-shrink-0 mt-0.5" />
-                                            <span>
-                                              <strong>{currentPersonality.name} assessment:</strong> {task.priorityExplanation}
-                                            </span>
-                                          </p>
-
-                                          {/* Sub checklist steps */}
-                                          <div className="space-y-1.5 border-t border-zinc-150 dark:border-zinc-900/60 pt-2">
-                                            <p className="text-[10px] font-mono font-bold text-zinc-400 dark:text-zinc-500 mb-1.5">
-                                              Survival Checklist ({completedCount}/{stepCount} completed):
-                                            </p>
-                                            {task.survivalPlan.map((step, idx) => {
-                                              const isStepCompleted = !!targetSteps[idx];
-                                              return (
-                                                <button
-                                                  key={idx}
-                                                  onClick={() => handleToggleSurvivalStep(task.id, idx)}
-                                                  className="w-full text-left p-2 bg-white dark:bg-zinc-900/40 hover:bg-zinc-50 dark:hover:bg-zinc-900 border border-zinc-150 dark:border-zinc-900 hover:border-zinc-250 dark:hover:border-zinc-800 rounded-xl transition-all flex items-center gap-3 cursor-pointer group/step"
-                                                >
-                                                  <div className="flex-shrink-0">
-                                                    {isStepCompleted ? (
-                                                      <CheckCircle2 className="w-4 h-4 text-emerald-500 dark:text-emerald-400 fill-emerald-400/10" />
-                                                    ) : (
-                                                      <div className="w-4 h-4 rounded-full border border-zinc-300 dark:border-zinc-750 group-hover/step:border-indigo-400 transition-colors" />
-                                                    )}
-                                                  </div>
-                                                  <span className={`text-[11px] font-sans ${isStepCompleted ? 'line-through text-zinc-400 dark:text-zinc-500' : 'text-zinc-700 dark:text-zinc-300 font-medium'}`}>
-                                                    {step}
-                                                  </span>
-                                                </button>
-                                              );
-                                            })}
-                                          </div>
-                                        </div>
                                       </div>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })
+
+                                      {/* AI Triage Display block */}
+                                      <div className="mt-4 border-t border-zinc-100 dark:border-zinc-900/60 pt-4 pl-8">
+                                        {!task.survivalPlan ? (
+                                          <div className="flex items-center justify-between gap-4">
+                                            <p className="text-[11px] text-zinc-500">
+                                              No tactical plan generated yet. Let your AI Companion analyze this target.
+                                            </p>
+                                            <button
+                                              onClick={() => handleAITriageTask(task)}
+                                              disabled={triagingTaskId === task.id}
+                                              className="px-3.5 py-1.5 bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/20 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 rounded-xl transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                            >
+                                              <Bot className="w-3.5 h-3.5" />
+                                              {triagingTaskId === task.id ? 'Analyzing threat...' : 'AI Triage Target'}
+                                            </button>
+                                          </div>
+                                        ) : (
+                                          <div className="space-y-3 animate-in fade-in duration-200">
+                                            <div className="flex items-center justify-between gap-3">
+                                              <div className="flex items-center gap-1.5">
+                                                <span className="text-xs">🤖</span>
+                                                <p className="text-[10px] font-mono font-bold text-zinc-500 dark:text-zinc-400">
+                                                  Triage Status:{' '}
+                                                  <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                                                    task.triagePriority === 'CRITICAL RESCUE' ? 'bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-500/20 font-bold' : 'bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-500/20 font-bold'
+                                                  }`}>
+                                                    {task.triagePriority}
+                                                  </span>
+                                                </p>
+                                              </div>
+                                              <button
+                                                onClick={() => handleAITriageTask(task)}
+                                                className="text-[9px] font-mono text-zinc-500 hover:text-zinc-800 dark:hover:text-white flex items-center gap-1 cursor-pointer"
+                                                title="Re-run triage content"
+                                              >
+                                                <RefreshCw className="w-2.5 h-2.5" />
+                                                Re-triage
+                                              </button>
+                                            </div>
+
+                                            <div className="p-3 bg-zinc-50/60 dark:bg-zinc-950 border border-zinc-200/60 dark:border-zinc-900 rounded-2xl">
+                                              <p className="text-[11px] text-zinc-700 dark:text-zinc-300 font-sans leading-relaxed mb-2.5 flex items-start gap-1">
+                                                <InfoIcon className="w-3 h-3 text-zinc-400 dark:text-zinc-500 flex-shrink-0 mt-0.5" />
+                                                <span>
+                                                  <strong>{currentPersonality.name} assessment:</strong> {task.priorityExplanation}
+                                                </span>
+                                              </p>
+
+                                              {/* Sub checklist steps */}
+                                              <div className="space-y-1.5 border-t border-zinc-150 dark:border-zinc-900/60 pt-2">
+                                                <p className="text-[10px] font-mono font-bold text-zinc-400 dark:text-zinc-500 mb-1.5">
+                                                  Survival Checklist ({completedCount}/{stepCount} completed):
+                                                </p>
+                                                {task.survivalPlan.map((step, idx) => {
+                                                  const isStepCompleted = !!targetSteps[idx];
+                                                  return (
+                                                    <button
+                                                      key={idx}
+                                                      onClick={() => handleToggleSurvivalStep(task.id, idx)}
+                                                      className="w-full text-left p-2 bg-white dark:bg-zinc-900/40 hover:bg-zinc-50 dark:hover:bg-zinc-900 border border-zinc-150 dark:border-zinc-900 hover:border-zinc-250 dark:hover:border-zinc-800 rounded-xl transition-all flex items-center gap-3 cursor-pointer group/step"
+                                                    >
+                                                      <div className="flex-shrink-0">
+                                                        {isStepCompleted ? (
+                                                          <CheckCircle2 className="w-4 h-4 text-emerald-500 dark:text-emerald-400 fill-emerald-400/10" />
+                                                        ) : (
+                                                          <div className="w-4 h-4 rounded-full border border-zinc-300 dark:border-zinc-750 group-hover/step:border-indigo-400 transition-colors" />
+                                                        )}
+                                                      </div>
+                                                      <span className={`text-[11px] font-sans ${isStepCompleted ? 'line-through text-zinc-400 dark:text-zinc-500' : 'text-zinc-700 dark:text-zinc-300 font-medium'}`}>
+                                                        {step}
+                                                      </span>
+                                                    </button>
+                                                  );
+                                                })}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </motion.div>
+                                  );
+                                })}
+                              </AnimatePresence>
+                            </div>
                           )}
                         </>
                       );
@@ -1815,6 +2074,113 @@ export default function App() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+
+
+      {/* Zen Cooldown Rest Mode Fullscreen Overlay */}
+      {isZenCooldownActive && (
+        <div className="fixed inset-0 bg-zinc-950 text-zinc-100 flex flex-col items-center justify-center p-6 z-50 overflow-y-auto animate-in fade-in duration-500">
+          <div className="absolute inset-0 bg-gradient-to-b from-emerald-950/15 via-zinc-950 to-zinc-950 pointer-events-none" />
+          
+          <div className="max-w-xl w-full text-center space-y-8 z-10">
+            <div className="space-y-2">
+              <span className="text-[10px] font-mono tracking-widest text-emerald-400 font-extrabold uppercase">
+                {lang === 'hi' ? '• सक्रिय ध्यानपूर्ण विश्राम •' : '• Active Mindful Rest Protocol •'}
+              </span>
+              <h2 className="font-display font-black text-3xl md:text-4xl text-white tracking-tight">
+                {lang === 'hi' ? 'सकारात्मक शीतलन दिवस' : 'Zen Cooldown Day'}
+              </h2>
+              <p className="text-sm text-zinc-400 leading-relaxed max-w-md mx-auto">
+                {lang === 'hi' ? 'आपकी उत्पादकता आपके मानसिक स्वास्थ्य पर निर्भर करती है। आज सांस लें, आराम करें और अपने लक्ष्यों को थाम लें।' : 'Your energy is a finite resource. Today, let go of the pressure to complete, and cultivate mindful space.'}
+              </p>
+            </div>
+
+            {/* Breathing Sphere */}
+            <div className="flex flex-col items-center justify-center py-6">
+              <div className="w-40 h-40 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center relative animate-pulse" style={{ animationDuration: '6s' }}>
+                <div className="w-28 h-28 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center animate-ping" style={{ animationDuration: '6s' }} />
+                <div className="absolute text-center text-[10px] font-mono text-emerald-400 uppercase font-bold tracking-wider">
+                  {lang === 'hi' ? 'सांस लें... और छोड़ें...' : 'Breathe In... Out...'}
+                </div>
+              </div>
+            </div>
+
+            {/* Zen Philosophy Quotes Card */}
+            <div className="p-6 bg-zinc-900/50 border border-zinc-800 rounded-2xl max-w-md mx-auto space-y-3 shadow-xl">
+              <Moon className="w-5 h-5 mx-auto text-emerald-400 animate-bounce" style={{ animationDuration: '4s' }} />
+              <p className="text-xs text-zinc-300 font-sans italic leading-relaxed">
+                {currentPersonality.id === 'philosopher'
+                  ? (lang === 'hi' ? '“समय एक नदी है जो वर्तमान में बहती है। किनारे पर बैठकर पानी का आनंद लें, तैरने की जल्दी न करें।”' : '“Do not speed up to catch the horizon. The horizon is already within you. Resting is as noble as striving.”')
+                  : (lang === 'hi' ? '“आज कोई कार्य सूची नहीं है। केवल अपनी शांत चेतना है। अपने काम को रुकने दें ताकि आत्मा बढ़ सके।”' : '“Today, there are no tasks. Only pure, tranquil awareness. Let your checklist sleep so your spirit can wake.”')
+                }
+              </p>
+              <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono block">
+                — {currentPersonality.name}
+              </span>
+            </div>
+
+            {/* Ambient Controls */}
+            <div className="space-y-2">
+              <span className="text-[9px] uppercase font-mono tracking-widest text-zinc-500 block">
+                {lang === 'hi' ? 'दबाएं और सुनिए:' : 'Soothing Ambience Generator:'}
+              </span>
+              <div className="flex justify-center gap-3">
+                <button
+                  onClick={() => synthManager.playZenDrone()}
+                  className="px-3.5 py-2 bg-zinc-900 hover:bg-zinc-850 text-[10px] font-semibold rounded-xl border border-zinc-800 text-zinc-300 transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Moon className="w-3.5 h-3.5 text-indigo-400" />
+                  Zen Drone
+                </button>
+                <button
+                  onClick={() => synthManager.playOcean()}
+                  className="px-3.5 py-2 bg-zinc-900 hover:bg-zinc-850 text-[10px] font-semibold rounded-xl border border-zinc-800 text-zinc-300 transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Compass className="w-3.5 h-3.5 text-sky-400" />
+                  Ocean Waves
+                </button>
+                <button
+                  onClick={() => synthManager.stop()}
+                  className="px-3.5 py-2 bg-zinc-900 hover:bg-zinc-850 text-[10px] font-semibold rounded-xl border border-zinc-800 text-zinc-400 transition-all cursor-pointer"
+                >
+                  Mute
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <button
+                onClick={() => handleToggleZenCooldown(false)}
+                className="px-6 py-3 bg-white text-zinc-950 hover:bg-zinc-200 text-xs font-bold rounded-2xl transition-all cursor-pointer shadow-lg inline-flex items-center gap-2"
+              >
+                <Sun className="w-4 h-4 text-amber-500" />
+                {lang === 'hi' ? 'जागृत कार्यक्षेत्र पर लौटें' : 'Resume Active Workspace'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Non-intrusive Toast Notifications at the bottom */}
+      {activeToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 p-4 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-white/95 dark:bg-zinc-950/95 backdrop-blur shadow-xl animate-in slide-in-from-bottom-5 duration-200 flex items-center gap-4 text-xs font-sans max-w-sm w-[90vw] justify-between">
+          <div className="flex items-center gap-2 text-zinc-800 dark:text-zinc-200">
+            <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+            <span>{activeToast.message}</span>
+          </div>
+          {activeToast.onUndo && (
+            <button
+              onClick={() => {
+                activeToast.onUndo?.();
+                setActiveToast(null);
+              }}
+              className="px-2.5 py-1 text-[10px] font-mono font-extrabold uppercase bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/15 rounded-lg hover:bg-indigo-500/25 transition-all cursor-pointer shrink-0"
+            >
+              {lang === 'hi' ? 'पूर्ववत (Undo)' : 'Undo'}
+            </button>
+          )}
         </div>
       )}
 

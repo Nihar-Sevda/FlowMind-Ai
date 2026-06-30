@@ -169,6 +169,29 @@ export default function FocusTimer({ onSessionComplete, accentColor = 'bg-indigo
     };
   }, []);
 
+  // Keyboard shortcut: Spacebar to pause/resume
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        const activeEl = document.activeElement;
+        if (activeEl && (
+          activeEl.tagName === 'INPUT' ||
+          activeEl.tagName === 'TEXTAREA' ||
+          activeEl.getAttribute('contenteditable') === 'true'
+        )) {
+          return;
+        }
+        e.preventDefault();
+        setIsRunning(prev => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeyDown);
+    };
+  }, []);
+
   const handleTimerComplete = () => {
     // Play a gentle built-in synth chime to signal session end
     try {
