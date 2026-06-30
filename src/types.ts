@@ -59,3 +59,12 @@ export interface CalendarEvent {
     date?: string;
   };
 }
+
+export interface QuickNote {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: string;
+  topic?: string;
+}
+

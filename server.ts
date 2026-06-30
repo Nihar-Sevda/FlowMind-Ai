@@ -292,6 +292,148 @@ app.post('/api/triage-deadline', async (req, res) => {
   }
 });
 
+// 3.6 AI Note Smart Enhancer Endpoint
+app.post('/api/enhance-note', async (req, res) => {
+  try {
+    const { text, title, lang } = req.body;
+    if (!text) {
+      return res.status(400).json({ error: 'Missing text for note enhancement' });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.log("Simulating high-fidelity note enhancement fallback...");
+      const isHi = lang === 'hi';
+      const enhancedTitle = title ? `${title} (Polished)` : (isHi ? 'बेहतरीन विचार' : 'Polished Thought Draft');
+      const enhancedContent = isHi
+        ? `### ✨ परिष्कृत नोट: ${title || 'त्वरित विचार'}\n\nयह आपके द्वारा दर्ज किए गए विचारों का एक संरचित और पेशेवर प्रारूप है:\n\n* **मुख्य विचार:** ${text}\n* **अगला कदम:** इस विचार को एक केंद्रित कार्य में बदलें और एकाग्रता क्षेत्र का उपयोग करें।\n\n*नोट: पूर्ण AI संवर्द्धन के लिए कृपया अपनी सेटिंग्स में GEMINI_API_KEY सेट करें।*`
+        : `### ✨ Polished Note: ${title || 'Quick Brainstorm'}\n\nHere is a structured, readable format of your drafted points:\n\n* **Core Concept:** ${text}\n* **Immediate Action Item:** Convert this insight into an active target objective and schedule a Pomodoro session.\n\n*Note: To unlock live generative AI enhancements, please set your GEMINI_API_KEY in the Settings.*`;
+      
+      return res.json({ title: enhancedTitle, content: enhancedContent });
+    }
+
+    const ai = getGeminiClient();
+    const systemPrompt = lang === 'hi' 
+      ? 'आप एक पेशेवर हिंदी उत्पादकता लेखक हैं। उपयोगकर्ता के दिए गए रफ नोट को व्यवस्थित, सुंदर मार्कडाउन बिंदुओं और साफ हिंदी शीर्षकों के साथ आकर्षक बनाएं।'
+      : 'You are a professional productivity editor. Take the user\'s raw, messy note and enhance it into professional, clean, structured markdown with key takeaways, action items, and refined bullet points.';
+
+    const prompt = `Please rewrite and enhance this note:
+    Title suggestion: "${title || ''}"
+    Raw note: "${text}"
+    
+    Respond with a JSON object holding "title" and "content" (in markdown).`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.5-flash',
+      contents: prompt,
+      config: {
+        systemInstruction: systemPrompt,
+        temperature: 0.7,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING, description: "A highly engaging, short title for the note" },
+            content: { type: Type.STRING, description: "Structured markdown content representing the polished and expanded note" }
+          },
+          required: ["title", "content"]
+        }
+      }
+    });
+
+    const parsed = JSON.parse((response.text || '{}').trim());
+    return res.json(parsed);
+
+  } catch (error: any) {
+    console.error('Error in enhance-note endpoint:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// 3.7 AI Goal/Task Splitter Endpoint
+app.post('/api/split-goal', async (req, res) => {
+  try {
+    const { goal, lang } = req.body;
+    if (!goal) {
+      return res.status(400).json({ error: 'Missing goal for splitter' });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.log("Simulating high-fidelity goal splitting fallback...");
+      const isHi = lang === 'hi';
+      const fallbackTasks = [
+        {
+          title: isHi ? `प्रारंभिक शोध: ${goal}` : `Initial Research: ${goal}`,
+          urgency: 'high',
+          duration: 30,
+          category: 'Research'
+        },
+        {
+          title: isHi ? `मूल योजना बनाना और रूपरेखा तैयार करना` : `Draft Outline & Strategy Setup`,
+          urgency: 'medium',
+          duration: 25,
+          category: 'Planning'
+        },
+        {
+          title: isHi ? `कार्यान्वयन का पहला चरण पूरा करना` : `Execution Phase 1: Core Draft`,
+          urgency: 'critical',
+          duration: 60,
+          category: 'Work'
+        },
+        {
+          title: isHi ? `समीक्षा करना और अंतिम सुधार` : `Review & Refine details`,
+          urgency: 'low',
+          duration: 15,
+          category: 'Review'
+        }
+      ];
+      return res.json({ subtasks: fallbackTasks });
+    }
+
+    const ai = getGeminiClient();
+    const systemPrompt = `You are a breakdown task planning expert. Take a high-level goal and divide it into 3 to 4 sequential, highly actionable sub-tasks. Each sub-task must specify a "title", "urgency" (one of: 'critical', 'high', 'medium', 'low'), "duration" (integer in minutes, between 10 and 120), and a "category" (e.g. 'Work', 'Research', 'Health', 'Errand', 'Study'). Output response in ${lang === 'hi' ? 'Hindi language' : 'English language'}.`;
+
+    const prompt = `Please split this goal into 3-4 ready-to-triage sub-tasks: "${goal}". Return a valid JSON.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.5-flash',
+      contents: prompt,
+      config: {
+        systemInstruction: systemPrompt,
+        temperature: 0.7,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            subtasks: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  urgency: { type: Type.STRING, description: "Must be one of: 'critical', 'high', 'medium', 'low'" },
+                  duration: { type: Type.INTEGER, description: "Estimated duration in minutes" },
+                  category: { type: Type.STRING, description: "Category label" }
+                },
+                required: ["title", "urgency", "duration", "category"]
+              }
+            }
+          },
+          required: ["subtasks"]
+        }
+      }
+    });
+
+    const parsed = JSON.parse((response.text || '{}').trim());
+    return res.json(parsed);
+
+  } catch (error: any) {
+    console.error('Error in split-goal endpoint:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 // 4. Vite middleware configuration or static hosting
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {

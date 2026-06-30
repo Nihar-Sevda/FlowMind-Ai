@@ -7,10 +7,12 @@ import PersonalityQuiz from './components/PersonalityQuiz';
 import FocusTimer from './components/FocusTimer';
 import CalendarDashboard from './components/CalendarDashboard';
 import AIOrbChat from './components/AIOrbChat';
+import AIEnhancedNotes from './components/AIEnhancedNotes';
 import RescueChart from './components/RescueChart';
 import { auth, googleSignIn, initAuth, logout, loginWithEmail, registerWithEmail } from './firebase';
 import { User } from 'firebase/auth';
-import { LogOut } from 'lucide-react';
+import { TRANSLATIONS, TranslationSet, TRANSLATE_URGENCY, USER_MODE_PREDICTIONS } from './data/translations';
+import { LogOut, Bell, BellOff, Languages } from 'lucide-react';
 import { 
   Compass, 
   Sparkles, 
@@ -41,6 +43,7 @@ import {
   CheckSquare2,
   CalendarDays,
   PlayCircle,
+  Notebook,
   HelpCircle as InfoIcon
 } from 'lucide-react';
 
@@ -74,7 +77,7 @@ export default function App() {
   });
 
   // Active navigation tab
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'planner' | 'focus' | 'calendar'>( 'dashboard' );
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'planner' | 'focus' | 'calendar' | 'notes'>( 'dashboard' );
 
   // Task list state (persistent rescue targets)
   const [tasks, setTasks] = useState<Task[]>(() => {
@@ -155,6 +158,32 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState<string>('');
   const [selectedTaskForFocus, setSelectedTaskForFocus] = useState<string>('');
 
+  // Language support ('en' | 'hi')
+  const [lang, setLang] = useState<'en' | 'hi'>(() => {
+    return (localStorage.getItem('flowmind_lang') as 'en' | 'hi') || 'en';
+  });
+
+  // Track the previous user id to manage transitions
+  const [prevUserId, setPrevUserId] = useState<string | null>(null);
+
+  // Push notification state
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      return Notification.permission === 'granted' && localStorage.getItem('flowmind_notifications') === 'true';
+    }
+    return false;
+  });
+
+  // Bare Minimum Mode state
+  const [bareMinimumMode, setBareMinimumMode] = useState<boolean>(() => {
+    return localStorage.getItem('flowmind_bare_minimum_mode') === 'true';
+  });
+
+  // Translation helper
+  const t = (key: keyof TranslationSet): string => {
+    return TRANSLATIONS[lang]?.[key] || TRANSLATIONS['en'][key];
+  };
+
   // Auth state subscriber
   useEffect(() => {
     const unsubscribe = initAuth(
@@ -188,14 +217,105 @@ export default function App() {
     localStorage.setItem('flowmind_dark_mode', String(darkMode));
   }, [darkMode]);
 
-  // 2. Sync tasks and steps to localStorage
+  // 2. User-specific task loading and saving
   useEffect(() => {
-    localStorage.setItem('flowmind_tasks', JSON.stringify(tasks));
-  }, [tasks]);
+    const uid = currentUser ? currentUser.uid : 'guest';
+    if (uid !== prevUserId) {
+      const userTasksKey = currentUser ? `flowmind_tasks_${currentUser.uid}` : 'flowmind_tasks';
+      const saved = localStorage.getItem(userTasksKey);
+      if (saved) {
+        try {
+          setTasks(JSON.parse(saved));
+        } catch {
+          setTasks([]);
+        }
+      } else {
+        // If a newly logged-in user, start with empty list []!
+        if (currentUser) {
+          setTasks([]);
+        } else {
+          // Guest defaults
+          const guestSaved = localStorage.getItem('flowmind_tasks');
+          if (guestSaved) {
+            try { setTasks(JSON.parse(guestSaved)); } catch { setTasks([]); }
+          }
+        }
+      }
+      setPrevUserId(uid);
+    }
+  }, [currentUser, prevUserId]);
+
+  // Sync tasks to correct key whenever tasks or currentUser changes
+  useEffect(() => {
+    const userTasksKey = currentUser ? `flowmind_tasks_${currentUser.uid}` : 'flowmind_tasks';
+    localStorage.setItem(userTasksKey, JSON.stringify(tasks));
+  }, [tasks, currentUser]);
 
   useEffect(() => {
     localStorage.setItem('flowmind_survival_steps', JSON.stringify(completedSurvivalSteps));
   }, [completedSurvivalSteps]);
+
+  // Sync language selection
+  useEffect(() => {
+    localStorage.setItem('flowmind_lang', lang);
+  }, [lang]);
+
+  // Sync Bare Minimum Mode selection
+  useEffect(() => {
+    localStorage.setItem('flowmind_bare_minimum_mode', String(bareMinimumMode));
+  }, [bareMinimumMode]);
+
+  // Push notification permission request helper
+  const requestNotificationPermission = async () => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      const permission = await Notification.requestPermission();
+      if (permission === 'granted') {
+        setNotificationsEnabled(true);
+        localStorage.setItem('flowmind_notifications', 'true');
+        const title = lang === 'hi' ? '🔔 सूचनाएं सक्रिय हैं!' : '🔔 Reminders Enabled!';
+        const body = lang === 'hi'
+          ? 'फ्लोमाइंड अब आपको आपके समयसीमा कार्यों के बारे में याद दिलाएगा।'
+          : 'FlowMind will now keep you accountable for critical deadlines.';
+        try {
+          new Notification(title, { body });
+        } catch (e) {
+          console.error('Notification constructor failed:', e);
+        }
+      } else {
+        setNotificationsEnabled(false);
+        localStorage.setItem('flowmind_notifications', 'false');
+      }
+    } else {
+      alert(lang === 'hi' ? 'यह ब्राउज़र पुश सूचनाओं का समर्थन नहीं करता है।' : 'This browser does not support push notifications.');
+    }
+  };
+
+  // Background check for pending critical deadlines
+  useEffect(() => {
+    if (!notificationsEnabled) return;
+
+    const runCheck = () => {
+      const pendingUrgent = tasks.filter(t => !t.completed && (t.urgency === 'critical' || t.urgency === 'high'));
+      if (pendingUrgent.length > 0) {
+        const primary = pendingUrgent[0];
+        const title = lang === 'hi' ? '⚠️ समयसीमा अनुस्मारक' : '⚠️ Critical Deadline Pending';
+        const body = lang === 'hi'
+          ? `आपके पास एक महत्वपूर्ण लंबित कार्य है: "${primary.title}"। कृपया इसे पूरा करें!`
+          : `Do not postpone! Your high-stakes task is pending: "${primary.title}".`;
+        
+        if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+          try {
+            new Notification(title, { body, tag: 'flowmind-alert' });
+          } catch (e) {
+            console.error('Failed to trigger background notification:', e);
+          }
+        }
+      }
+    };
+
+    const checker = setInterval(runCheck, 60000); // Check every 60 seconds
+    return () => clearInterval(checker);
+  }, [tasks, notificationsEnabled, lang]);
 
   const handleEmailPasswordAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -307,6 +427,16 @@ export default function App() {
     if (!customTitle) {
       setNewTaskTitle('');
     }
+  };
+
+  const handleAddMultipleTasks = (newTasksList: Omit<Task, 'id' | 'completed' | 'calendarSynced'>[]) => {
+    const formatted = newTasksList.map((t, idx) => ({
+      ...t,
+      id: `split-task-${Date.now()}-${idx}`,
+      completed: false,
+      calendarSynced: false
+    }));
+    setTasks(prev => [...formatted, ...prev]);
   };
 
   const handleToggleTask = (id: string) => {
@@ -560,6 +690,50 @@ export default function App() {
     }
   };
 
+  // AI Predictive Risk Engine Analytics Calculator
+  const getRiskAssessment = () => {
+    const pending = tasks.filter(t => !t.completed);
+    let score = 0;
+    pending.forEach(t => {
+      if (t.urgency === 'critical') score += 4;
+      else if (t.urgency === 'high') score += 2;
+      else if (t.urgency === 'medium') score += 1;
+      
+      const dueDate = new Date(t.dueDate);
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      dueDate.setHours(0,0,0,0);
+      if (dueDate.getTime() <= today.getTime()) {
+        score += 3; // overdue or due today
+      }
+    });
+
+    let level: 'low' | 'medium' | 'critical' = 'low';
+    let statusText = t('riskLow');
+    let recommendationText = t('recommendationLow');
+    let userModeType = USER_MODE_PREDICTIONS[lang]['low'];
+    let badgeColor = 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20';
+    let glowColor = 'bg-emerald-500';
+
+    if (score >= 8) {
+      level = 'critical';
+      statusText = t('riskCritical');
+      recommendationText = t('recommendationCritical');
+      userModeType = USER_MODE_PREDICTIONS[lang]['critical'];
+      badgeColor = 'bg-rose-500/10 text-rose-500 border-rose-500/20 animate-pulse';
+      glowColor = 'bg-rose-500';
+    } else if (score >= 4) {
+      level = 'medium';
+      statusText = t('riskMedium');
+      recommendationText = t('recommendationMedium');
+      userModeType = USER_MODE_PREDICTIONS[lang]['medium'];
+      badgeColor = 'bg-amber-500/10 text-amber-500 border-amber-500/20';
+      glowColor = 'bg-amber-500';
+    }
+
+    return { score, level, statusText, recommendationText, userModeType, badgeColor, glowColor };
+  };
+
   if (authChecking) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#faf9f5] dark:bg-zinc-950 text-zinc-800 dark:text-zinc-250">
@@ -737,7 +911,7 @@ export default function App() {
         <div className="m-4 p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200/65 dark:border-zinc-850 flex items-center gap-3 relative overflow-hidden group">
           <span className="text-3xl filter drop-shadow group-hover:scale-110 transition-transform">{currentPersonality.emoji}</span>
           <div className="min-w-0">
-            <span className="text-[9px] uppercase font-mono font-extrabold text-zinc-400 dark:text-zinc-500 block">Active Companion</span>
+            <span className="text-[9px] uppercase font-mono font-extrabold text-zinc-400 dark:text-zinc-500 block">{t('activeCompanion')}</span>
             <span className="text-xs font-display font-bold text-zinc-800 dark:text-zinc-200 truncate block">{currentPersonality.name}</span>
             <span className="text-[10px] text-zinc-500 dark:text-zinc-400 italic truncate block">"{currentPersonality.tagline}"</span>
           </div>
@@ -755,7 +929,7 @@ export default function App() {
             }`}
           >
             <LayoutDashboard className="w-4 h-4 text-zinc-400" />
-            Workspace Overview
+            {t('workspaceOverview')}
           </button>
 
           <button
@@ -767,7 +941,7 @@ export default function App() {
             }`}
           >
             <ShieldAlert className="w-4 h-4 text-rose-400" />
-            Deadline Planner
+            {t('deadlinePlanner')}
             {tasks.filter(t => !t.completed && t.urgency === 'critical').length > 0 && (
               <span className="ml-auto w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
             )}
@@ -782,7 +956,7 @@ export default function App() {
             }`}
           >
             <Flame className="w-4 h-4 text-amber-500 animate-pulse" />
-            Focus Space
+            {t('focusSpace')}
           </button>
 
           <button
@@ -794,7 +968,19 @@ export default function App() {
             }`}
           >
             <Calendar className="w-4 h-4 text-indigo-400" />
-            Calendar Timeline
+            {t('calendarTimeline')}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('notes')}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-medium rounded-xl transition-all cursor-pointer ${
+              activeTab === 'notes'
+                ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-850 shadow-sm'
+                : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 hover:text-zinc-850 dark:hover:text-zinc-200'
+            }`}
+          >
+            <Notebook className="w-4 h-4 text-emerald-400" />
+            {t('quickNotes')}
           </button>
         </nav>
 
@@ -803,20 +989,61 @@ export default function App() {
           
           <button
             onClick={() => setShowQuizModal(true)}
-            className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-850 text-zinc-600 dark:text-zinc-300 rounded-xl border border-zinc-200 dark:border-zinc-800 text-xs transition-all cursor-pointer font-sans font-semibold"
+            className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-850 text-zinc-600 dark:text-zinc-300 rounded-xl border border-zinc-200 dark:border-zinc-800 text-[11px] transition-all cursor-pointer font-sans font-semibold"
           >
-            <Compass className="w-4 h-4 text-indigo-400" />
-            Change Companion Quiz
+            <Compass className="w-3.5 h-3.5 text-indigo-400" />
+            {t('changeCompanionQuiz')}
           </button>
 
           <div className="flex items-center justify-between p-1 bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl">
-            <span className="text-[10px] text-zinc-500 pl-2 font-mono">Dark mode</span>
+            <span className="text-[10px] text-zinc-500 pl-2 font-mono flex items-center gap-1.5">
+              <Languages className="w-3.5 h-3.5 text-indigo-500" />
+              Language / भाषा
+            </span>
+            <button
+              onClick={() => setLang(lang === 'en' ? 'hi' : 'en')}
+              className="px-2 py-0.5 text-[9px] font-mono font-bold bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 border border-zinc-250 dark:border-zinc-800 rounded-lg transition-all cursor-pointer shadow-sm"
+            >
+              {lang === 'en' ? 'EN' : 'हिं'}
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between p-1 bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl">
+            <span className="text-[10px] text-zinc-500 pl-2 font-mono">{t('darkMode')}</span>
             <button
               onClick={() => setDarkMode(!darkMode)}
               className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg transition-all"
             >
               {darkMode ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
             </button>
+          </div>
+
+          <button
+            onClick={requestNotificationPermission}
+            className="w-full flex items-center justify-between p-1 px-2 bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl hover:bg-zinc-200 dark:hover:bg-zinc-900 transition-all cursor-pointer"
+          >
+            <span className="text-[10px] text-zinc-500 font-mono flex items-center gap-1.5">
+              {notificationsEnabled ? (
+                <Bell className="w-3.5 h-3.5 text-emerald-500" />
+              ) : (
+                <BellOff className="w-3.5 h-3.5 text-zinc-400" />
+              )}
+              {t('enableReminders')}
+            </span>
+            <span className={`text-[8px] font-mono font-bold px-1.5 py-0.5 rounded ${
+              notificationsEnabled ? 'bg-emerald-500/10 text-emerald-500' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500'
+            }`}>
+              {notificationsEnabled ? 'ON' : 'OFF'}
+            </span>
+          </button>
+
+          <div className="text-center pt-2 border-t border-zinc-100 dark:border-zinc-900/60 mt-2">
+            <a 
+              href="mailto:niharsevda04@gmail.com" 
+              className="text-[9px] font-mono text-zinc-400 dark:text-zinc-500 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors"
+            >
+              {t('createdBy')}
+            </a>
           </div>
 
           {currentUser && (
@@ -947,6 +1174,14 @@ export default function App() {
                 >
                   Calendar
                 </button>
+                <button
+                  onClick={() => setActiveTab('notes')}
+                  className={`flex-1 py-2 text-[11px] font-sans rounded-xl font-medium whitespace-nowrap transition-all ${
+                    activeTab === 'notes' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500'
+                  }`}
+                >
+                  Notes & AI Splitter
+                </button>
               </div>
 
               {/* -------------------- VIEW 1: DASHBOARD OVERVIEW -------------------- */}
@@ -1011,6 +1246,70 @@ export default function App() {
                       <span className="text-[9px] text-zinc-500 dark:text-zinc-600 block mt-0.5">Efficiency rating</span>
                     </div>
                   </div>
+
+                  {/* AI Predictive Risk Engine Section */}
+                  {(() => {
+                    const risk = getRiskAssessment();
+                    return (
+                      <div className="p-6 rounded-3xl border border-zinc-200/80 dark:border-zinc-900 bg-white dark:bg-zinc-900/30 shadow-sm flex flex-col md:flex-row gap-6 items-stretch justify-between relative overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300">
+                        {/* Decorative side glow representing current risk threat */}
+                        <div className={`absolute top-0 bottom-0 left-0 w-1.5 ${risk.glowColor}`} />
+                        
+                        <div className="flex-1 space-y-3.5">
+                          <div className="flex items-center gap-2.5">
+                            <BrainCircuit className="w-5 h-5 text-indigo-500 animate-pulse" />
+                            <h3 className="font-display font-extrabold text-xs text-zinc-900 dark:text-zinc-100 uppercase tracking-wider font-mono">
+                              {t('predictiveRiskEngine')}
+                            </h3>
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${risk.badgeColor}`}>
+                              {risk.statusText}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4 bg-zinc-50 dark:bg-zinc-950/60 p-4 rounded-2xl border border-zinc-150 dark:border-zinc-900/60">
+                            <div>
+                              <span className="text-[9px] uppercase font-mono text-zinc-400 block mb-0.5">{t('userTypePrediction')}</span>
+                              <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">{risk.userModeType}</span>
+                            </div>
+                            <div>
+                              <span className="text-[9px] uppercase font-mono text-zinc-400 block mb-0.5">{t('riskLevel')}</span>
+                              <span className="text-xs font-mono font-bold text-zinc-800 dark:text-zinc-200">{risk.score} / 20</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex-1 flex flex-col justify-between gap-4 border-t md:border-t-0 md:border-l border-zinc-150 dark:border-zinc-900/60 pt-4 md:pt-0 md:pl-6">
+                          <div>
+                            <span className="text-[9px] uppercase font-mono text-zinc-400 block mb-1">{t('recommendation')}</span>
+                            <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed font-sans font-medium">
+                              {risk.recommendationText}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center justify-between p-3.5 bg-indigo-50/40 dark:bg-zinc-950/40 rounded-2xl border border-indigo-100/40 dark:border-zinc-900/40">
+                            <div className="flex flex-col">
+                              <span className="text-xs font-bold text-zinc-850 dark:text-zinc-200">{t('bareMinimumMode')}</span>
+                              <span className="text-[10px] text-zinc-400 font-mono mt-0.5">
+                                {lang === 'hi' ? 'केवल अति-महत्वपूर्ण लक्ष्यों को ही दिखाएं।' : 'Filter out low priorities to focus.'}
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => setBareMinimumMode(!bareMinimumMode)}
+                              className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                bareMinimumMode ? 'bg-indigo-600' : 'bg-zinc-200 dark:bg-zinc-800'
+                              }`}
+                            >
+                              <span
+                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                  bareMinimumMode ? 'translate-x-5' : 'translate-x-0'
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Core layout grid */}
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1116,179 +1415,216 @@ export default function App() {
                       </span>
                     </div>
 
-                    {tasks.length === 0 ? (
-                      <div className="text-center py-16 bg-zinc-900/10 border border-dashed border-zinc-900 rounded-3xl text-zinc-500">
-                        <CheckCircle2 className="w-10 h-10 mx-auto mb-2 text-emerald-500/40" />
-                        <p className="text-xs font-sans">No threat targets listed. Excellent work!</p>
-                      </div>
-                    ) : (
-                      tasks.map((task) => {
-                        const targetSteps = completedSurvivalSteps[task.id] || {};
-                        const stepCount = task.survivalPlan?.length || 0;
-                        const completedCount = Object.values(targetSteps).filter(Boolean).length;
+                    {(() => {
+                      const displayedTasks = bareMinimumMode
+                        ? tasks.filter(t => t.urgency === 'critical' || t.urgency === 'high')
+                        : tasks;
+                      const hiddenCount = tasks.length - displayedTasks.length;
 
-                        return (
-                          <div
-                            key={task.id}
-                            className={`p-5 rounded-3xl border transition-all relative overflow-hidden bg-white dark:bg-zinc-900/30 border-zinc-200/80 dark:border-zinc-900 shadow-sm dark:shadow-none ${
-                              task.completed ? 'opacity-60 saturate-50' : ''
-                            }`}
-                          >
-                            {/* Decorative color tag */}
-                            <div className={`absolute top-0 bottom-0 left-0 w-1 ${
-                              task.urgency === 'critical' ? 'bg-rose-500' 
-                                : task.urgency === 'high' ? 'bg-amber-500' 
-                                : task.urgency === 'medium' ? 'bg-indigo-500' 
-                                : 'bg-emerald-500'
-                            }`} />
-
-                            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-                              <div className="flex items-start gap-3.5">
-                                {/* Toggle master complete */}
-                                <button
-                                  onClick={() => handleToggleTask(task.id)}
-                                  className="mt-0.5 text-zinc-500 hover:text-indigo-400 transition-colors cursor-pointer"
-                                >
-                                  {task.completed ? (
-                                    <CheckCircle2 className="w-5 h-5 text-indigo-500 fill-indigo-500/10" />
-                                  ) : (
-                                    <Circle className="w-5 h-5 text-zinc-400 dark:text-zinc-700 hover:text-zinc-600 dark:hover:text-zinc-500" />
-                                  )}
-                                </button>
-
-                                <div className="space-y-1">
-                                  <h4 className={`font-display font-bold text-sm text-zinc-800 dark:text-zinc-200 ${task.completed ? 'line-through text-zinc-400 dark:text-zinc-500' : ''}`}>
-                                    {task.title}
-                                  </h4>
-                                  
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <span className="text-[10px] font-mono bg-zinc-100 dark:bg-zinc-950 px-2 py-0.5 rounded text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-900">
-                                      {task.category}
-                                    </span>
-                                    <span className="text-[10px] font-mono text-zinc-500 flex items-center gap-1">
-                                      <Clock className="w-3 h-3 text-zinc-400 dark:text-zinc-600" />
-                                      {getDaysRemainingText(task.dueDate)}
-                                    </span>
-                                  </div>
+                      return (
+                        <>
+                          {bareMinimumMode && hiddenCount > 0 && (
+                            <div className="p-4 rounded-3xl border border-amber-500/20 bg-amber-500/5 text-amber-600 dark:text-amber-400 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in duration-200">
+                              <div className="flex items-center gap-2.5">
+                                <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 animate-bounce" style={{ animationDuration: '3s' }} />
+                                <div>
+                                  <span className="font-bold">
+                                    {lang === 'hi' ? '⚠️ न्यूनतम कार्य मोड सक्रिय!' : '⚠️ Bare Minimum Mode Active!'}
+                                  </span>
+                                  <span className="ml-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+                                    {lang === 'hi'
+                                      ? `कम प्राथमिकता वाले ${hiddenCount} कार्य छिपे हुए हैं ताकि आप तनाव से बच सकें। केवल आवश्यक काम करें!`
+                                      : `We filtered out ${hiddenCount} low-priority goals to keep you focused only on critical targets.`}
+                                  </span>
                                 </div>
                               </div>
+                              <button
+                                onClick={() => setBareMinimumMode(false)}
+                                className="px-3 py-1 text-[10px] font-bold bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 rounded-xl transition-all self-end sm:self-auto cursor-pointer"
+                              >
+                                {lang === 'hi' ? 'सभी कार्य दिखाएं' : 'Show All Tasks'}
+                              </button>
+                            </div>
+                          )}
 
-                              {/* Task Action items */}
-                              <div className="flex flex-wrap gap-2 self-start md:self-auto pl-8 md:pl-0">
-                                <button
-                                  onClick={() => handleLaunchFocusForTask(task)}
-                                  className="px-2.5 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl text-[10px] text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white transition-all flex items-center gap-1 cursor-pointer"
-                                  title="Import to active focus timer session"
-                                >
-                                  <PlayCircle className="w-3.5 h-3.5 text-amber-500" />
-                                  Focus Lock
-                                </button>
+                          {displayedTasks.length === 0 ? (
+                            <div className="text-center py-16 bg-zinc-900/10 border border-dashed border-zinc-900 rounded-3xl text-zinc-500">
+                              <CheckCircle2 className="w-10 h-10 mx-auto mb-2 text-emerald-500/40" />
+                              <p className="text-xs font-sans">
+                                {lang === 'hi' ? 'कोई लंबित कार्य नहीं मिला। बेहतरीन काम!' : 'No threat targets listed. Excellent work!'}
+                              </p>
+                            </div>
+                          ) : (
+                            displayedTasks.map((task) => {
+                              const targetSteps = completedSurvivalSteps[task.id] || {};
+                              const stepCount = task.survivalPlan?.length || 0;
+                              const completedCount = Object.values(targetSteps).filter(Boolean).length;
 
-                                <button
-                                  onClick={() => handleSyncTaskToCalendar(task)}
-                                  className={`px-2.5 py-1.5 border rounded-xl text-[10px] transition-all flex items-center gap-1 cursor-pointer ${
-                                    task.calendarSynced 
-                                      ? 'bg-emerald-50 dark:bg-emerald-500/5 border-emerald-200 dark:border-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-semibold' 
-                                      : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white'
+                              return (
+                                <div
+                                  key={task.id}
+                                  className={`p-5 rounded-3xl border transition-all relative overflow-hidden bg-white dark:bg-zinc-900/30 border-zinc-200/80 dark:border-zinc-900 shadow-sm dark:shadow-none ${
+                                    task.completed ? 'opacity-60 saturate-50' : ''
                                   }`}
                                 >
-                                  <CalendarDays className="w-3.5 h-3.5 text-indigo-400" />
-                                  {task.calendarSynced ? 'Synced Schedule' : 'Schedule Sync'}
-                                </button>
+                                  {/* Decorative color tag */}
+                                  <div className={`absolute top-0 bottom-0 left-0 w-1 ${
+                                    task.urgency === 'critical' ? 'bg-rose-500' 
+                                      : task.urgency === 'high' ? 'bg-amber-500' 
+                                      : task.urgency === 'medium' ? 'bg-indigo-500' 
+                                      : 'bg-emerald-500'
+                                  }`} />
 
-                                <button
-                                  onClick={() => handleDeleteTask(task.id)}
-                                  className="p-1.5 bg-zinc-50 dark:bg-zinc-950 hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400 border border-zinc-200 dark:border-zinc-900 rounded-xl transition-all cursor-pointer"
-                                  title="Remove target"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5 text-zinc-500" />
-                                </button>
-                              </div>
-                            </div>
+                                  <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                                    <div className="flex items-start gap-3.5">
+                                      {/* Toggle master complete */}
+                                      <button
+                                        onClick={() => handleToggleTask(task.id)}
+                                        className="mt-0.5 text-zinc-500 hover:text-indigo-400 transition-colors cursor-pointer"
+                                      >
+                                        {task.completed ? (
+                                          <CheckCircle2 className="w-5 h-5 text-indigo-500 fill-indigo-500/10" />
+                                        ) : (
+                                          <Circle className="w-5 h-5 text-zinc-400 dark:text-zinc-700 hover:text-zinc-600 dark:hover:text-zinc-500" />
+                                        )}
+                                      </button>
 
-                            {/* AI Triage Display block */}
-                            <div className="mt-4 border-t border-zinc-100 dark:border-zinc-900/60 pt-4 pl-8">
-                              {!task.survivalPlan ? (
-                                <div className="flex items-center justify-between gap-4">
-                                  <p className="text-[11px] text-zinc-500">
-                                    No tactical plan generated yet. Let your AI Companion analyze this target.
-                                  </p>
-                                  <button
-                                    onClick={() => handleAITriageTask(task)}
-                                    disabled={triagingTaskId === task.id}
-                                    className="px-3.5 py-1.5 bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/20 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 rounded-xl transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                                  >
-                                    <Bot className="w-3.5 h-3.5" />
-                                    {triagingTaskId === task.id ? 'Analyzing threat...' : 'AI Triage Target'}
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="space-y-3 animate-in fade-in duration-200">
-                                  <div className="flex items-center justify-between gap-3">
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="text-xs">🤖</span>
-                                      <p className="text-[10px] font-mono font-bold text-zinc-500 dark:text-zinc-400">
-                                        Triage Status:{' '}
-                                        <span className={`text-[9px] px-1.5 py-0.5 rounded ${
-                                          task.triagePriority === 'CRITICAL RESCUE' ? 'bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-500/20 font-bold' : 'bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-500/20 font-bold'
-                                        }`}>
-                                          {task.triagePriority}
-                                        </span>
-                                      </p>
+                                      <div className="space-y-1">
+                                        <h4 className={`font-display font-bold text-sm text-zinc-800 dark:text-zinc-200 ${task.completed ? 'line-through text-zinc-400 dark:text-zinc-500' : ''}`}>
+                                          {task.title}
+                                        </h4>
+                                        
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <span className="text-[10px] font-mono bg-zinc-100 dark:bg-zinc-950 px-2 py-0.5 rounded text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-900">
+                                            {task.category}
+                                          </span>
+                                          <span className="text-[10px] font-mono text-zinc-500 flex items-center gap-1">
+                                            <Clock className="w-3 h-3 text-zinc-400 dark:text-zinc-600" />
+                                            {getDaysRemainingText(task.dueDate)}
+                                          </span>
+                                        </div>
+                                      </div>
                                     </div>
-                                    <button
-                                      onClick={() => handleAITriageTask(task)}
-                                      className="text-[9px] font-mono text-zinc-500 hover:text-zinc-800 dark:hover:text-white flex items-center gap-1 cursor-pointer"
-                                      title="Re-run triage content"
-                                    >
-                                      <RefreshCw className="w-2.5 h-2.5" />
-                                      Re-triage
-                                    </button>
+
+                                    {/* Task Action items */}
+                                    <div className="flex flex-wrap gap-2 self-start md:self-auto pl-8 md:pl-0">
+                                      <button
+                                        onClick={() => handleLaunchFocusForTask(task)}
+                                        className="px-2.5 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl text-[10px] text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white transition-all flex items-center gap-1 cursor-pointer"
+                                        title="Import to active focus timer session"
+                                      >
+                                        <PlayCircle className="w-3.5 h-3.5 text-amber-500" />
+                                        Focus Lock
+                                      </button>
+
+                                      <button
+                                        onClick={() => handleSyncTaskToCalendar(task)}
+                                        className={`px-2.5 py-1.5 border rounded-xl text-[10px] transition-all flex items-center gap-1 cursor-pointer ${
+                                          task.calendarSynced 
+                                            ? 'bg-emerald-50 dark:bg-emerald-500/5 border-emerald-200 dark:border-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-semibold' 
+                                            : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white'
+                                        }`}
+                                      >
+                                        <CalendarDays className="w-3.5 h-3.5 text-indigo-400" />
+                                        {task.calendarSynced ? 'Synced Schedule' : 'Schedule Sync'}
+                                      </button>
+
+                                      <button
+                                        onClick={() => handleDeleteTask(task.id)}
+                                        className="p-1.5 bg-zinc-50 dark:bg-zinc-950 hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400 border border-zinc-200 dark:border-zinc-900 rounded-xl transition-all cursor-pointer"
+                                        title="Remove target"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5 text-zinc-500" />
+                                      </button>
+                                    </div>
                                   </div>
 
-                                  <div className="p-3 bg-zinc-50/60 dark:bg-zinc-950 border border-zinc-200/60 dark:border-zinc-900 rounded-2xl">
-                                    <p className="text-[11px] text-zinc-700 dark:text-zinc-300 font-sans leading-relaxed mb-2.5 flex items-start gap-1">
-                                      <InfoIcon className="w-3 h-3 text-zinc-400 dark:text-zinc-500 flex-shrink-0 mt-0.5" />
-                                      <span>
-                                        <strong>{currentPersonality.name} assessment:</strong> {task.priorityExplanation}
-                                      </span>
-                                    </p>
-
-                                    {/* Sub checklist steps */}
-                                    <div className="space-y-1.5 border-t border-zinc-150 dark:border-zinc-900/60 pt-2">
-                                      <p className="text-[10px] font-mono font-bold text-zinc-400 dark:text-zinc-500 mb-1.5">
-                                        Survival Checklist ({completedCount}/{stepCount} completed):
-                                      </p>
-                                      {task.survivalPlan.map((step, idx) => {
-                                        const isStepCompleted = !!targetSteps[idx];
-                                        return (
+                                  {/* AI Triage Display block */}
+                                  <div className="mt-4 border-t border-zinc-100 dark:border-zinc-900/60 pt-4 pl-8">
+                                    {!task.survivalPlan ? (
+                                      <div className="flex items-center justify-between gap-4">
+                                        <p className="text-[11px] text-zinc-500">
+                                          No tactical plan generated yet. Let your AI Companion analyze this target.
+                                        </p>
+                                        <button
+                                          onClick={() => handleAITriageTask(task)}
+                                          disabled={triagingTaskId === task.id}
+                                          className="px-3.5 py-1.5 bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/20 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 rounded-xl transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                        >
+                                          <Bot className="w-3.5 h-3.5" />
+                                          {triagingTaskId === task.id ? 'Analyzing threat...' : 'AI Triage Target'}
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="space-y-3 animate-in fade-in duration-200">
+                                        <div className="flex items-center justify-between gap-3">
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="text-xs">🤖</span>
+                                            <p className="text-[10px] font-mono font-bold text-zinc-500 dark:text-zinc-400">
+                                              Triage Status:{' '}
+                                              <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                                                task.triagePriority === 'CRITICAL RESCUE' ? 'bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-500/20 font-bold' : 'bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-500/20 font-bold'
+                                              }`}>
+                                                {task.triagePriority}
+                                              </span>
+                                            </p>
+                                          </div>
                                           <button
-                                            key={idx}
-                                            onClick={() => handleToggleSurvivalStep(task.id, idx)}
-                                            className="w-full text-left p-2 bg-white dark:bg-zinc-900/40 hover:bg-zinc-50 dark:hover:bg-zinc-900 border border-zinc-150 dark:border-zinc-900 hover:border-zinc-250 dark:hover:border-zinc-800 rounded-xl transition-all flex items-center gap-3 cursor-pointer group/step"
+                                            onClick={() => handleAITriageTask(task)}
+                                            className="text-[9px] font-mono text-zinc-500 hover:text-zinc-800 dark:hover:text-white flex items-center gap-1 cursor-pointer"
+                                            title="Re-run triage content"
                                           >
-                                            <div className="flex-shrink-0">
-                                              {isStepCompleted ? (
-                                                <CheckCircle2 className="w-4 h-4 text-emerald-500 dark:text-emerald-400 fill-emerald-400/10" />
-                                              ) : (
-                                                <div className="w-4 h-4 rounded-full border border-zinc-300 dark:border-zinc-750 group-hover/step:border-indigo-400 transition-colors" />
-                                              )}
-                                            </div>
-                                            <span className={`text-[11px] font-sans ${isStepCompleted ? 'line-through text-zinc-400 dark:text-zinc-500' : 'text-zinc-700 dark:text-zinc-300 font-medium'}`}>
-                                              {step}
-                                            </span>
+                                            <RefreshCw className="w-2.5 h-2.5" />
+                                            Re-triage
                                           </button>
-                                        );
-                                      })}
-                                    </div>
+                                        </div>
+
+                                        <div className="p-3 bg-zinc-50/60 dark:bg-zinc-950 border border-zinc-200/60 dark:border-zinc-900 rounded-2xl">
+                                          <p className="text-[11px] text-zinc-700 dark:text-zinc-300 font-sans leading-relaxed mb-2.5 flex items-start gap-1">
+                                            <InfoIcon className="w-3 h-3 text-zinc-400 dark:text-zinc-500 flex-shrink-0 mt-0.5" />
+                                            <span>
+                                              <strong>{currentPersonality.name} assessment:</strong> {task.priorityExplanation}
+                                            </span>
+                                          </p>
+
+                                          {/* Sub checklist steps */}
+                                          <div className="space-y-1.5 border-t border-zinc-150 dark:border-zinc-900/60 pt-2">
+                                            <p className="text-[10px] font-mono font-bold text-zinc-400 dark:text-zinc-500 mb-1.5">
+                                              Survival Checklist ({completedCount}/{stepCount} completed):
+                                            </p>
+                                            {task.survivalPlan.map((step, idx) => {
+                                              const isStepCompleted = !!targetSteps[idx];
+                                              return (
+                                                <button
+                                                  key={idx}
+                                                  onClick={() => handleToggleSurvivalStep(task.id, idx)}
+                                                  className="w-full text-left p-2 bg-white dark:bg-zinc-900/40 hover:bg-zinc-50 dark:hover:bg-zinc-900 border border-zinc-150 dark:border-zinc-900 hover:border-zinc-250 dark:hover:border-zinc-800 rounded-xl transition-all flex items-center gap-3 cursor-pointer group/step"
+                                                >
+                                                  <div className="flex-shrink-0">
+                                                    {isStepCompleted ? (
+                                                      <CheckCircle2 className="w-4 h-4 text-emerald-500 dark:text-emerald-400 fill-emerald-400/10" />
+                                                    ) : (
+                                                      <div className="w-4 h-4 rounded-full border border-zinc-300 dark:border-zinc-750 group-hover/step:border-indigo-400 transition-colors" />
+                                                    )}
+                                                  </div>
+                                                  <span className={`text-[11px] font-sans ${isStepCompleted ? 'line-through text-zinc-400 dark:text-zinc-500' : 'text-zinc-700 dark:text-zinc-300 font-medium'}`}>
+                                                    {step}
+                                                  </span>
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
+                              );
+                            })
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
 
                 </div>
@@ -1347,6 +1683,18 @@ export default function App() {
                     accentColor={accentColor}
                     borderColor={borderColor}
                     textColor={textColor}
+                  />
+                </div>
+              )}
+
+              {/* -------------------- VIEW 5: QUICK NOTES & AI SPLITTER -------------------- */}
+              {activeTab === 'notes' && (
+                <div className="max-w-4xl mx-auto animate-in fade-in duration-200">
+                  <AIEnhancedNotes 
+                    lang={lang}
+                    t={t}
+                    onAddMultipleTasks={handleAddMultipleTasks}
+                    currentPersonality={currentPersonality}
                   />
                 </div>
               )}
