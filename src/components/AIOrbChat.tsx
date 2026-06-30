@@ -78,6 +78,16 @@ export default function AIOrbChat({
     return () => clearTimeout(animId);
   }, [isSpeaking, currentPersonality]);
 
+  // Pre-load voices for TTS
+  useEffect(() => {
+    if (window.speechSynthesis) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.getVoices();
+      };
+    }
+  }, []);
+
   // Handle TTS speaking
   const speakText = (text: string) => {
     if (!voiceEnabled) return;
