@@ -84,42 +84,42 @@ When responding:
 export const DIAGNOSTIC_QUIZ: QuizQuestion[] = [
   {
     id: 1,
-    text: "When you have a massive, complex project ahead of you, your typical reaction is to:",
+    text: "How do you handle a massive, complex project?",
     options: [
-      { text: "Feel anxious or overwhelmed, needing reassurance and a gentle starting point.", personalityId: 'mentor' },
-      { text: "Write down a checklist, eliminate distractions, and start grinding immediately.", personalityId: 'coach' },
-      { text: "Step back, contemplate the core purpose, and seek clarity before acting.", personalityId: 'philosopher' },
-      { text: "Doodle, generate wild ideas, and find an exciting, unconventional path to solve it.", personalityId: 'creative' }
+      { text: "I feel anxious and need a gentle, warm starting point.", personalityId: 'mentor' },
+      { text: "I build a checklist and start grinding immediately.", personalityId: 'coach' },
+      { text: "I step back to seek deep purpose and clarity first.", personalityId: 'philosopher' },
+      { text: "I look for a fun, creative, unconventional path.", personalityId: 'creative' }
     ]
   },
   {
     id: 2,
-    text: "What makes a productive day feel truly successful to you?",
+    text: "What does a successful day look like to you?",
     options: [
-      { text: "Feeling happy, balanced, and proud of making steady progress without burning out.", personalityId: 'mentor' },
-      { text: "Crossing off every single high-priority target and hitting maximum efficiency.", personalityId: 'coach' },
-      { text: "Spending hours in uninterrupted deep focus on something deeply meaningful.", personalityId: 'philosopher' },
-      { text: "Discovering fresh connections, learning something cool, or designing something new.", personalityId: 'creative' }
+      { text: "Steady, stress-free progress without burning out.", personalityId: 'mentor' },
+      { text: "Crushing every major high-priority target.", personalityId: 'coach' },
+      { text: "Hours of tranquil, uninterrupted deep focus.", personalityId: 'philosopher' },
+      { text: "Brainstorming and making exciting discoveries.", personalityId: 'creative' }
     ]
   },
   {
     id: 3,
-    text: "When you inevitably get distracted or procrastinate, you prefer a helper who:",
+    text: "When you procrastinate, what helper style works best?",
     options: [
-      { text: "Comforts you, reminds you that setbacks are human, and helps you restart with kindness.", personalityId: 'mentor' },
-      { text: "Gives you a firm wake-up call, demands accountability, and pushes you back to action.", personalityId: 'coach' },
-      { text: "Helps you reflect on the root of your hesitation and find alignment again.", personalityId: 'philosopher' },
-      { text: "Gamifies your tasks, changes the scene, or turns your focus into a creative challenge.", personalityId: 'creative' }
+      { text: "An encouraging guide who understands my setbacks.", personalityId: 'mentor' },
+      { text: "A direct coach who holds me accountable.", personalityId: 'coach' },
+      { text: "A mindful guide who prompts quiet self-reflection.", personalityId: 'philosopher' },
+      { text: "A creative spark who gamifies the struggle.", personalityId: 'creative' }
     ]
   },
   {
     id: 4,
-    text: "Select the quote that resonates most with your current life state:",
+    text: "Which core philosophy resonates with you most?",
     options: [
-      { text: "\"Be gentle with yourself. You are doing the best you can.\" — Unknown", personalityId: 'mentor' },
-      { text: "\"Discipline is choosing between what you want now and what you want most.\" — Abraham Lincoln", personalityId: 'coach' },
-      { text: "\"Simplify your life, and the universe will feel simpler.\" — Thoreau", personalityId: 'philosopher' },
-      { text: "\"Creativity is intelligence having fun.\" — Albert Einstein", personalityId: 'creative' }
+      { text: "Sustainable growth, patience, and kindness.", personalityId: 'mentor' },
+      { text: "Radical discipline, consistency, and action.", personalityId: 'coach' },
+      { text: "Deep presence, simple focus, and mindfulness.", personalityId: 'philosopher' },
+      { text: "Endless imagination, lateral ideas, and play.", personalityId: 'creative' }
     ]
   }
 ];

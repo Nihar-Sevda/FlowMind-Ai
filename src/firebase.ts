@@ -79,20 +79,23 @@ export const initAuth = (
 export const loginWithEmail = async (email: string, password: string): Promise<User> => {
   try {
     const result = await signInWithEmailAndPassword(auth, email, password);
+    // On successful firebase login, also sync/create local account password for robust future sessions
+    const accounts = getLocalAccounts();
+    const normalizedEmail = email.toLowerCase().trim();
+    accounts[normalizedEmail] = {
+      passwordHash: btoa(password),
+      displayName: result.user.displayName || normalizedEmail.split('@')[0]
+    };
+    saveLocalAccounts(accounts);
     return result.user;
   } catch (error: any) {
-    if (error.code === 'auth/operation-not-allowed' || error.message?.includes('operation-not-allowed')) {
-      console.warn('Firebase Email/Password auth is disabled on this project. Falling back to local accounts.');
-      const accounts = getLocalAccounts();
-      const normalizedEmail = email.toLowerCase().trim();
-      const account = accounts[normalizedEmail];
-      
-      if (!account || account.passwordHash !== btoa(password)) {
-        const mockError = new Error('Invalid email or password.') as any;
-        mockError.code = 'auth/invalid-credential';
-        throw mockError;
-      }
-      
+    const normalizedEmail = email.toLowerCase().trim();
+    const accounts = getLocalAccounts();
+    const account = accounts[normalizedEmail];
+    
+    // Check local sandbox account if firebase fails or is disabled
+    if (account && account.passwordHash === btoa(password)) {
+      console.log('Logging in with local sandbox account credentials.');
       const mockUser = {
         uid: `local_${normalizedEmail}`,
         email: normalizedEmail,
@@ -103,6 +106,12 @@ export const loginWithEmail = async (email: string, password: string): Promise<U
       localStorage.setItem('flowmind_local_session', JSON.stringify(mockUser));
       return mockUser;
     }
+
+    if (error.code === 'auth/operation-not-allowed' || error.message?.includes('operation-not-allowed')) {
+      const mockError = new Error('Invalid email or password.') as any;
+      mockError.code = 'auth/invalid-credential';
+      throw mockError;
+    }
     throw error;
   }
 };
@@ -111,19 +120,27 @@ export const loginWithEmail = async (email: string, password: string): Promise<U
 export const registerWithEmail = async (email: string, password: string): Promise<User> => {
   try {
     const result = await createUserWithEmailAndPassword(auth, email, password);
+    // On successful firebase register, also save locally to allow local overrides/fallback
+    const accounts = getLocalAccounts();
+    const normalizedEmail = email.toLowerCase().trim();
+    accounts[normalizedEmail] = {
+      passwordHash: btoa(password),
+      displayName: result.user.displayName || normalizedEmail.split('@')[0]
+    };
+    saveLocalAccounts(accounts);
     return result.user;
   } catch (error: any) {
-    if (error.code === 'auth/operation-not-allowed' || error.message?.includes('operation-not-allowed')) {
-      console.warn('Firebase Email/Password auth is disabled on this project. Falling back to local sandbox registration.');
+    if (
+      error.code === 'auth/operation-not-allowed' || 
+      error.message?.includes('operation-not-allowed') ||
+      error.code === 'auth/email-already-in-use' ||
+      error.message?.includes('email-already-in-use')
+    ) {
+      console.warn('Falling back to local sandbox registration/password update for email:', email);
       const accounts = getLocalAccounts();
       const normalizedEmail = email.toLowerCase().trim();
       
-      if (accounts[normalizedEmail]) {
-        const mockError = new Error('This email is already registered.') as any;
-        mockError.code = 'auth/email-already-in-use';
-        throw mockError;
-      }
-      
+      // Update/overwrite password hash for the local account
       accounts[normalizedEmail] = {
         passwordHash: btoa(password),
         displayName: normalizedEmail.split('@')[0]

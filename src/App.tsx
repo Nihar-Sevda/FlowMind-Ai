@@ -5,6 +5,7 @@ import { synthManager } from './utils/audioSynth';
 import { AIPersonality, Task, TimerMode } from './types';
 import { AI_PERSONALITIES } from './data/personalities';
 import PersonalityQuiz from './components/PersonalityQuiz';
+import SlideToUnlock from './components/SlideToUnlock';
 import FocusTimer from './components/FocusTimer';
 import CalendarDashboard from './components/CalendarDashboard';
 import AIOrbChat from './components/AIOrbChat';
@@ -80,6 +81,7 @@ export default function App() {
   const [isOnboarding, setIsOnboarding] = useState<boolean>(() => {
     return !localStorage.getItem('flowmind_selected_personality_id');
   });
+  const [onboardingStep, setOnboardingStep] = useState<'intro' | 'quiz'>('intro');
 
   // Active navigation tab
   const [activeTab, setActiveTab] = useState<'dashboard' | 'planner' | 'focus' | 'calendar' | 'notes'>( 'dashboard' );
@@ -1317,20 +1319,87 @@ export default function App() {
         <main className="flex-1 p-6 sm:p-8 max-w-6xl w-full mx-auto">
           
           {isOnboarding ? (
-            <div className="max-w-2xl mx-auto py-8">
-              <div className="text-center mb-8">
-                <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 mb-4 animate-pulse">
-                  <Compass className="w-6 h-6" />
+            onboardingStep === 'intro' ? (
+              <div className="max-w-3xl mx-auto py-8">
+                {/* Visual Intro Banner */}
+                <div className="text-center mb-10">
+                  <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-500 dark:text-indigo-400 mb-5 relative group">
+                    <div className="absolute inset-0 rounded-2xl bg-indigo-500/10 blur-xl opacity-50 group-hover:opacity-100 transition-opacity animate-pulse" />
+                    <Sparkles className="w-7 h-7 relative" />
+                  </div>
+                  <h2 className="font-sans font-black text-4xl sm:text-5xl text-zinc-900 dark:text-white tracking-tight mb-3">
+                    Meet <span className="bg-gradient-to-r from-indigo-500 via-purple-500 to-violet-500 bg-clip-text text-transparent">FlowMind</span>
+                  </h2>
+                  <p className="text-sm sm:text-base text-zinc-500 dark:text-zinc-400 max-w-lg mx-auto leading-relaxed">
+                    A professional, high-fidelity productivity companion designed to completely eliminate task resistance, break anxiety loops, and guarantee you never miss a deadline.
+                  </p>
                 </div>
-                <h2 className="font-display font-extrabold text-3xl text-zinc-900 dark:text-white tracking-tight mb-2">
-                  Select Your Companion
-                </h2>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm mx-auto leading-relaxed">
-                  Every procrastinator needs a unique antidote. Take this diagnostic quiz to identify your ideal high-stakes deadline partner.
-                </p>
+
+                {/* Features list/grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+                  <div className="p-6 bg-white dark:bg-zinc-900/55 border border-zinc-250/70 dark:border-zinc-850 rounded-2xl shadow-sm relative group hover:border-indigo-500/40 transition-colors">
+                    <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-500 dark:text-rose-400 flex items-center justify-center mb-4 font-mono font-bold text-xs">
+                      01
+                    </div>
+                    <h3 className="font-sans font-bold text-base text-zinc-900 dark:text-zinc-100 mb-1.5">
+                      Deadline Security
+                    </h3>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                      AI Triage calculates high-stakes risk matrices, highlights critical targets, and ensures you stay ahead of every schedule.
+                    </p>
+                  </div>
+
+                  <div className="p-6 bg-white dark:bg-zinc-900/55 border border-zinc-250/70 dark:border-zinc-850 rounded-2xl shadow-sm relative group hover:border-indigo-500/40 transition-colors">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-500 dark:text-indigo-400 flex items-center justify-center mb-4 font-mono font-bold text-xs">
+                      02
+                    </div>
+                    <h3 className="font-sans font-bold text-base text-zinc-900 dark:text-zinc-100 mb-1.5">
+                      AI Companion Personas
+                    </h3>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                      Whether you need firm accountability, nurturing support, zen mindfulness, or creative brainstorming.
+                    </p>
+                  </div>
+
+                  <div className="p-6 bg-white dark:bg-zinc-900/55 border border-zinc-250/70 dark:border-zinc-850 rounded-2xl shadow-sm relative group hover:border-indigo-500/40 transition-colors">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 dark:text-emerald-400 flex items-center justify-center mb-4 font-mono font-bold text-xs">
+                      03
+                    </div>
+                    <h3 className="font-sans font-bold text-base text-zinc-900 dark:text-zinc-100 mb-1.5">
+                      Micro-Step Splitting
+                    </h3>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                      Conquer procrastination. Automatically decompose overwhelming projects into 3 tiny, bite-sized daily achievements.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Tactical Slide to Unlock / Metaphorical Slider */}
+                <div className="space-y-4 text-center">
+                  <div className="max-w-md mx-auto">
+                    <SlideToUnlock onUnlocked={() => setOnboardingStep('quiz')} />
+                  </div>
+                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-mono tracking-wider uppercase">
+                    Slide to activate focus & select companion
+                  </p>
+                </div>
               </div>
-              <PersonalityQuiz onSelectPersonality={handleSelectPersonality} />
-            </div>
+            ) : (
+              <div className="max-w-2xl mx-auto py-8">
+                <div className="text-center mb-8">
+                  <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 mb-4 animate-pulse">
+                    <Compass className="w-6 h-6" />
+                  </div>
+                  <h2 className="font-display font-extrabold text-3xl text-zinc-900 dark:text-white tracking-tight mb-2">
+                    Select Your Companion
+                  </h2>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm mx-auto leading-relaxed">
+                    Every work style is unique. Complete this brief diagnostic to select an AI partner tailored to secure your deadlines.
+                  </p>
+                </div>
+                <PersonalityQuiz onSelectPersonality={handleSelectPersonality} />
+              </div>
+            )
           ) : (
             <div className="space-y-6">
               
