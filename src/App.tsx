@@ -589,6 +589,9 @@ export default function App() {
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+           alert("Invalid Gemini API Key. Please check your API key in the settings.");
+        }
         throw new Error('Triage failure response');
       }
 
@@ -787,6 +790,12 @@ export default function App() {
           lang: lang
         })
       });
+      if (!response.ok) {
+        if (response.status === 401) {
+           alert("Invalid Gemini API Key. Please check your API key in the settings.");
+        }
+        throw new Error("Failed to fetch advice");
+      }
       const data = await response.json();
       if (data.advice) {
         setActiveAdvice(data.advice);
@@ -1448,7 +1457,7 @@ export default function App() {
               </div>
 
               {/* -------------------- VIEW 1: DASHBOARD OVERVIEW -------------------- */}
-              {activeTab === 'dashboard' && (
+              <div style={{ display: activeTab === 'dashboard' ? 'block' : 'none' }}>
                 <div className="space-y-6 animate-in fade-in duration-200">
                   
                   {/* Proactive Guardian Banner */}
@@ -1663,10 +1672,10 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-              )}
+              </div>
 
               {/* -------------------- VIEW 2: DEADLINE PLANNER -------------------- */}
-              {activeTab === 'planner' && (
+              <div style={{ display: activeTab === 'planner' ? 'block' : 'none' }}>
                 <div className="space-y-6 animate-in fade-in duration-200">
                   
                   {/* Action plan form */}
@@ -1956,10 +1965,10 @@ export default function App() {
                   </div>
 
                 </div>
-              )}
+              </div>
 
               {/* -------------------- VIEW 3: FOCUS SPACE -------------------- */}
-              {activeTab === 'focus' && (
+              <div style={{ display: activeTab === 'focus' ? 'block' : 'none' }}>
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-200">
                   
                   {/* Big Focus session launcher card */}
@@ -1999,13 +2008,24 @@ export default function App() {
                     </div>
 
                     {/* SVG Chart display within focus tab for convenience */}
-                    <RescueChart completedPomodoros={completedPomodoros} />
+                    <div className="relative">
+                      <RescueChart completedPomodoros={completedPomodoros} />
+                      <button 
+                        onClick={() => {
+                          setCompletedPomodoros(0);
+                          localStorage.setItem('flowmind_pomodoros', '0');
+                        }}
+                        className="mt-3 text-[11px] font-medium font-sans text-zinc-500 hover:text-zinc-300 w-full text-center transition-colors px-3 py-1.5 border border-zinc-800 rounded-lg bg-zinc-900/30 hover:bg-zinc-800/50"
+                      >
+                        Reset Pomodoro Counts
+                      </button>
+                    </div>
                   </div>
                 </div>
-              )}
+              </div>
 
               {/* -------------------- VIEW 4: GOOGLE CALENDAR TIMELINE -------------------- */}
-              {activeTab === 'calendar' && (
+              <div style={{ display: activeTab === 'calendar' ? 'block' : 'none' }}>
                 <div className="max-w-4xl mx-auto animate-in fade-in duration-200">
                   <CalendarDashboard 
                     accentColor={accentColor}
@@ -2013,10 +2033,10 @@ export default function App() {
                     textColor={textColor}
                   />
                 </div>
-              )}
+              </div>
 
               {/* -------------------- VIEW 5: QUICK NOTES & AI SPLITTER -------------------- */}
-              {activeTab === 'notes' && (
+              <div style={{ display: activeTab === 'notes' ? 'block' : 'none' }}>
                 <div className="max-w-4xl mx-auto animate-in fade-in duration-200">
                   <AIEnhancedNotes 
                     lang={lang}
@@ -2025,7 +2045,7 @@ export default function App() {
                     currentPersonality={currentPersonality}
                   />
                 </div>
-              )}
+              </div>
 
             </div>
           )}

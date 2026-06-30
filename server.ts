@@ -15,14 +15,11 @@ app.use(express.json());
 // Initialize Gemini SDK lazily
 let aiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI {
-  if (!aiClient) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.warn("WARNING: GEMINI_API_KEY environment variable is not set. Chat features will require it.");
-    }
-    aiClient = new GoogleGenAI({ apiKey: apiKey || '' });
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
+  if (!apiKey || apiKey.trim() === '') {
+    console.warn("WARNING: GEMINI_API_KEY environment variable is not set. Chat features will require it.");
   }
-  return aiClient;
+  return new GoogleGenAI({ apiKey: apiKey || '' });
 }
 
 // 1. Debug endpoint to inspect headers (useful for locating OAuth token)
@@ -137,6 +134,14 @@ app.post('/api/chat', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
 
   try {
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
+    if (!apiKey || apiKey.trim() === '') {
+       res.write(`data: ${JSON.stringify({ text: "Please set your GEMINI_API_KEY in the environment variables to use chat features." })}\n\n`);
+       res.write('data: [DONE]\n\n');
+       res.end();
+       return;
+    }
+
     const { messages, systemInstruction, userPrompt } = req.body;
 
     if (!messages || !Array.isArray(messages)) {
@@ -163,7 +168,7 @@ app.post('/api/chat', async (req, res) => {
     }
 
     const responseStream = await ai.models.generateContentStream({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-2.5-flash',
       contents: contents,
       config: {
         systemInstruction: systemInstruction || 'You are FlowMind, a helpful productivity assistant.',
@@ -183,7 +188,11 @@ app.post('/api/chat', async (req, res) => {
     res.end();
   } catch (error: any) {
     console.error('Error in Gemini Chat stream:', error);
-    res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    if (error.status === 401 || error.message.includes('401') || error.message.includes('invalid authentication credentials')) {
+      res.write(`data: ${JSON.stringify({ text: "Error: Invalid Gemini API Key. Please check your API key in the settings." })}\n\n`);
+    } else {
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    }
     res.end();
   }
 });
@@ -198,8 +207,8 @@ app.post('/api/triage-deadline', async (req, res) => {
     }
 
     // Check if key exists
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
+    if (!apiKey || apiKey.trim() === '') {
       // Graceful high-fidelity fallback when API key is missing
       console.log("Simulating high-stakes deadline triage fallback...");
       
@@ -254,7 +263,7 @@ app.post('/api/triage-deadline', async (req, res) => {
     Return a valid JSON according to the responseSchema.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-2.5-flash',
       contents: prompt,
       config: {
         systemInstruction: companionSystemInstruction || "You are a high-stakes AI deadline rescue manager.",
@@ -288,6 +297,9 @@ app.post('/api/triage-deadline', async (req, res) => {
 
   } catch (error: any) {
     console.error('Error in deadline triage endpoint:', error);
+    if (error.status === 401 || error.message?.includes('401') || error.message?.includes('invalid authentication credentials')) {
+      return res.status(401).json({ error: "Invalid Gemini API Key. Please check your settings." });
+    }
     return res.status(500).json({ error: error.message });
   }
 });
@@ -300,8 +312,8 @@ app.post('/api/enhance-note', async (req, res) => {
       return res.status(400).json({ error: 'Missing text for note enhancement' });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
+    if (!apiKey || apiKey.trim() === '') {
       console.log("Simulating high-fidelity note enhancement fallback...");
       const isHi = lang === 'hi';
       const enhancedTitle = title ? `${title} (Polished)` : (isHi ? 'बेहतरीन विचार' : 'Polished Thought Draft');
@@ -324,7 +336,7 @@ app.post('/api/enhance-note', async (req, res) => {
     Respond with a JSON object holding "title" and "content" (in markdown).`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-2.5-flash',
       contents: prompt,
       config: {
         systemInstruction: systemPrompt,
@@ -346,6 +358,9 @@ app.post('/api/enhance-note', async (req, res) => {
 
   } catch (error: any) {
     console.error('Error in enhance-note endpoint:', error);
+    if (error.status === 401 || error.message?.includes('401') || error.message?.includes('invalid authentication credentials')) {
+      return res.status(401).json({ error: "Invalid Gemini API Key. Please check your settings." });
+    }
     return res.status(500).json({ error: error.message });
   }
 });
@@ -358,8 +373,8 @@ app.post('/api/split-goal', async (req, res) => {
       return res.status(400).json({ error: 'Missing goal for splitter' });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
+    if (!apiKey || apiKey.trim() === '') {
       console.log("Simulating high-fidelity goal splitting fallback...");
       const isHi = lang === 'hi';
       const fallbackTasks = [
@@ -397,7 +412,7 @@ app.post('/api/split-goal', async (req, res) => {
     const prompt = `Please split this goal into 3-4 ready-to-triage sub-tasks: "${goal}". Return a valid JSON.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-2.5-flash',
       contents: prompt,
       config: {
         systemInstruction: systemPrompt,
@@ -430,6 +445,9 @@ app.post('/api/split-goal', async (req, res) => {
 
   } catch (error: any) {
     console.error('Error in split-goal endpoint:', error);
+    if (error.status === 401 || error.message?.includes('401') || error.message?.includes('invalid authentication credentials')) {
+      return res.status(401).json({ error: "Invalid Gemini API Key. Please check your settings." });
+    }
     return res.status(500).json({ error: error.message });
   }
 });
@@ -442,8 +460,8 @@ app.post('/api/voice-dump', async (req, res) => {
       return res.status(400).json({ error: 'Missing transcript for voice-dump processing' });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
+    if (!apiKey || apiKey.trim() === '') {
       console.log("Simulating high-fidelity voice dump extraction fallback...");
       const isHi = lang === 'hi';
       const todayStr = new Date().toISOString().split('T')[0];
@@ -481,7 +499,7 @@ Ensure you write the task titles in the user's spoken language or English depend
     const prompt = `Unstructured thoughts: "${transcript}". Please extract actionable items. Return valid JSON matching the schema.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-2.5-flash',
       contents: prompt,
       config: {
         systemInstruction: systemPrompt,
@@ -515,6 +533,9 @@ Ensure you write the task titles in the user's spoken language or English depend
 
   } catch (error: any) {
     console.error('Error in voice-dump endpoint:', error);
+    if (error.status === 401 || error.message?.includes('401') || error.message?.includes('invalid authentication credentials')) {
+      return res.status(401).json({ error: "Invalid Gemini API Key. Please check your settings." });
+    }
     return res.status(500).json({ error: error.message });
   }
 });
@@ -525,8 +546,8 @@ app.post('/api/companion-advice', async (req, res) => {
     const { personalityId, personalityName, systemInstruction, tasks, lang } = req.body;
     const isHi = lang === 'hi';
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
+    if (!apiKey || apiKey.trim() === '') {
       console.log("Simulating high-fidelity companion active advice fallback...");
       
       // Let's analyze the tasks to offer real contextual advice!
@@ -578,7 +599,7 @@ ${pendingTasksText}
 Please give me an interactive, tailored, and active brainstorm session of advice as my chosen companion. Address me directly with your personality style. Include a couple of fun, highly specific feature/action ideas I can try right now. Keep it around 150-200 words.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-2.5-flash',
       contents: prompt,
       config: {
         systemInstruction: systemPrompt,
@@ -591,6 +612,9 @@ Please give me an interactive, tailored, and active brainstorm session of advice
 
   } catch (error: any) {
     console.error('Error in companion-advice endpoint:', error);
+    if (error.status === 401 || error.message?.includes('401') || error.message?.includes('invalid authentication credentials')) {
+      return res.status(401).json({ error: "Invalid Gemini API Key. Please check your settings." });
+    }
     return res.status(500).json({ error: error.message });
   }
 });

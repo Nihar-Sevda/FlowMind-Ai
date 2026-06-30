@@ -148,6 +148,9 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
       });
 
       if (!res.ok) {
+        if (res.status === 401) {
+           alert("Invalid Gemini API Key. Please check your API key in the settings.");
+        }
         throw new Error('Failed to parse unstructured thoughts');
       }
 
@@ -218,7 +221,12 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
         })
       });
 
-      if (!res.ok) throw new Error('Enhancement failed');
+      if (!res.ok) {
+        if (res.status === 401) {
+           alert("Invalid Gemini API Key. Please check your API key in the settings.");
+        }
+        throw new Error('Enhancement failed');
+      }
       const data = await res.json();
       
       setNotes(notes.map(n => {
@@ -256,7 +264,12 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
         })
       });
 
-      if (!res.ok) throw new Error('Goal split failed');
+      if (!res.ok) {
+        if (res.status === 401) {
+           alert("Invalid Gemini API Key. Please check your API key in the settings.");
+        }
+        throw new Error('Goal split failed');
+      }
       const data = await res.json();
       setSplitResults(data.subtasks || []);
     } catch (err) {
