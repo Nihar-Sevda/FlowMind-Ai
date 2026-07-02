@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, Type, Modality } from '@google/genai';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -14,12 +14,21 @@ app.use(express.json());
 
 // Initialize Gemini SDK lazily
 let aiClient: GoogleGenAI | null = null;
+let currentClientKey: string | null = null;
+
 function getGeminiClient(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY || '';
+  if (aiClient && currentClientKey === apiKey) {
+    return aiClient;
+  }
+  
   if (!apiKey || apiKey.trim() === '') {
     console.warn("WARNING: GEMINI_API_KEY environment variable is not set. Chat features will require it.");
   }
-  return new GoogleGenAI({ apiKey: apiKey || '' });
+  
+  aiClient = new GoogleGenAI({ apiKey: apiKey });
+  currentClientKey = apiKey;
+  return aiClient;
 }
 
 // 1. Debug endpoint to inspect headers (useful for locating OAuth token)
@@ -168,7 +177,7 @@ app.post('/api/chat', async (req, res) => {
     }
 
     const responseStream = await ai.models.generateContentStream({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.5-flash',
       contents: contents,
       config: {
         systemInstruction: systemInstruction || 'You are FlowMind, a helpful productivity assistant.',
@@ -263,7 +272,7 @@ app.post('/api/triage-deadline', async (req, res) => {
     Return a valid JSON according to the responseSchema.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.5-flash',
       contents: prompt,
       config: {
         systemInstruction: companionSystemInstruction || "You are a high-stakes AI deadline rescue manager.",
@@ -315,18 +324,18 @@ app.post('/api/enhance-note', async (req, res) => {
     const apiKey = process.env.GEMINI_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
     if (!apiKey || apiKey.trim() === '') {
       console.log("Simulating high-fidelity note enhancement fallback...");
-      const isHi = lang === 'hi';
-      const enhancedTitle = title ? `${title} (Polished)` : (isHi ? 'बेहतरीन विचार' : 'Polished Thought Draft');
-      const enhancedContent = isHi
-        ? `### ✨ परिष्कृत नोट: ${title || 'त्वरित विचार'}\n\nयह आपके द्वारा दर्ज किए गए विचारों का एक संरचित और पेशेवर प्रारूप है:\n\n* **मुख्य विचार:** ${text}\n* **अगला कदम:** इस विचार को एक केंद्रित कार्य में बदलें और एकाग्रता क्षेत्र का उपयोग करें।\n\n*नोट: पूर्ण AI संवर्द्धन के लिए कृपया अपनी सेटिंग्स में GEMINI_API_KEY सेट करें।*`
+      const isHinglish = lang === 'hinglish';
+      const enhancedTitle = title ? `${title} (Polished)` : (isHinglish ? 'Polished Thought' : 'Polished Thought Draft');
+      const enhancedContent = isHinglish
+        ? `### ✨ Polished Note: ${title || 'Quick Brainstorm'}\n\nYeh aapke raw thoughts ka ek beautiful structured format hai:\n\n* **Main Concept:** ${text}\n* **Next Step:** Is thought ko ek focus task me badlein aur focus space use karein.\n\n*Note: Full AI experience ke liye please Settings me GEMINI_API_KEY set karein.*`
         : `### ✨ Polished Note: ${title || 'Quick Brainstorm'}\n\nHere is a structured, readable format of your drafted points:\n\n* **Core Concept:** ${text}\n* **Immediate Action Item:** Convert this insight into an active target objective and schedule a Pomodoro session.\n\n*Note: To unlock live generative AI enhancements, please set your GEMINI_API_KEY in the Settings.*`;
       
       return res.json({ title: enhancedTitle, content: enhancedContent });
     }
 
     const ai = getGeminiClient();
-    const systemPrompt = lang === 'hi' 
-      ? 'आप एक पेशेवर हिंदी उत्पादकता लेखक हैं। उपयोगकर्ता के दिए गए रफ नोट को व्यवस्थित, सुंदर मार्कडाउन बिंदुओं और साफ हिंदी शीर्षकों के साथ आकर्षक बनाएं।'
+    const systemPrompt = lang === 'hinglish' 
+      ? 'You are a professional productivity writer. Take the user\'s raw, messy note and enhance it into professional, clean, structured markdown in casual Hinglish (Hindi mixed with English, written in the Latin alphabet, e.g. "Yeh aapka refined note hai").'
       : 'You are a professional productivity editor. Take the user\'s raw, messy note and enhance it into professional, clean, structured markdown with key takeaways, action items, and refined bullet points.';
 
     const prompt = `Please rewrite and enhance this note:
@@ -336,7 +345,7 @@ app.post('/api/enhance-note', async (req, res) => {
     Respond with a JSON object holding "title" and "content" (in markdown).`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.5-flash',
       contents: prompt,
       config: {
         systemInstruction: systemPrompt,
@@ -376,28 +385,28 @@ app.post('/api/split-goal', async (req, res) => {
     const apiKey = process.env.GEMINI_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
     if (!apiKey || apiKey.trim() === '') {
       console.log("Simulating high-fidelity goal splitting fallback...");
-      const isHi = lang === 'hi';
+      const isHinglish = lang === 'hinglish';
       const fallbackTasks = [
         {
-          title: isHi ? `प्रारंभिक शोध: ${goal}` : `Initial Research: ${goal}`,
+          title: isHinglish ? `Initial Research: ${goal}` : `Initial Research: ${goal}`,
           urgency: 'high',
           duration: 30,
           category: 'Research'
         },
         {
-          title: isHi ? `मूल योजना बनाना और रूपरेखा तैयार करना` : `Draft Outline & Strategy Setup`,
+          title: isHinglish ? `Plan taiyar karna aur Outline banana` : `Draft Outline & Strategy Setup`,
           urgency: 'medium',
           duration: 25,
           category: 'Planning'
         },
         {
-          title: isHi ? `कार्यान्वयन का पहला चरण पूरा करना` : `Execution Phase 1: Core Draft`,
+          title: isHinglish ? `Core Work start karna` : `Execution Phase 1: Core Draft`,
           urgency: 'critical',
           duration: 60,
           category: 'Work'
         },
         {
-          title: isHi ? `समीक्षा करना और अंतिम सुधार` : `Review & Refine details`,
+          title: isHinglish ? `Sari details review aur edit karna` : `Review & Refine details`,
           urgency: 'low',
           duration: 15,
           category: 'Review'
@@ -407,12 +416,12 @@ app.post('/api/split-goal', async (req, res) => {
     }
 
     const ai = getGeminiClient();
-    const systemPrompt = `You are a breakdown task planning expert. Take a high-level goal and divide it into 3 to 4 sequential, highly actionable sub-tasks. Each sub-task must specify a "title", "urgency" (one of: 'critical', 'high', 'medium', 'low'), "duration" (integer in minutes, between 10 and 120), and a "category" (e.g. 'Work', 'Research', 'Health', 'Errand', 'Study'). Output response in ${lang === 'hi' ? 'Hindi language' : 'English language'}.`;
+    const systemPrompt = `You are a breakdown task planning expert. Take a high-level goal and divide it into 3 to 4 sequential, highly actionable sub-tasks. Each sub-task must specify a "title", "urgency" (one of: 'critical', 'high', 'medium', 'low'), "duration" (integer in minutes, between 10 and 120), and a "category" (e.g. 'Work', 'Research', 'Health', 'Errand', 'Study'). Output response in ${lang === 'hinglish' ? 'Hinglish language (casual mix of Hindi and English in Roman/Latin script, e.g. "Presentation taiyar karein")' : 'English language'}.`;
 
     const prompt = `Please split this goal into 3-4 ready-to-triage sub-tasks: "${goal}". Return a valid JSON.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.5-flash',
       contents: prompt,
       config: {
         systemInstruction: systemPrompt,
@@ -463,19 +472,19 @@ app.post('/api/voice-dump', async (req, res) => {
     const apiKey = process.env.GEMINI_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
     if (!apiKey || apiKey.trim() === '') {
       console.log("Simulating high-fidelity voice dump extraction fallback...");
-      const isHi = lang === 'hi';
+      const isHinglish = lang === 'hinglish';
       const todayStr = new Date().toISOString().split('T')[0];
       const tomorrowStr = new Date(Date.now() + 86400000).toISOString().split('T')[0];
       const extractedTasks = [
         {
-          title: isHi ? `डेटाबेस स्कीमा के बारे में सारा को ईमेल करें` : `Email Sarah about database schema`,
+          title: isHinglish ? `Sarah ko database schema ke baare me email bhejna` : `Email Sarah about database schema`,
           urgency: 'high',
           duration: 15,
           category: 'Work',
           dueDate: tomorrowStr
         },
         {
-          title: isHi ? `शुक्रवार तक परिनियोजन (deployment) पूरा करें` : `Complete deployment by Friday`,
+          title: isHinglish ? `Friday tak server deployment complete karna` : `Complete deployment by Friday`,
           urgency: 'critical',
           duration: 60,
           category: 'Work',
@@ -499,7 +508,7 @@ Ensure you write the task titles in the user's spoken language or English depend
     const prompt = `Unstructured thoughts: "${transcript}". Please extract actionable items. Return valid JSON matching the schema.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.5-flash',
       contents: prompt,
       config: {
         systemInstruction: systemPrompt,
@@ -544,7 +553,7 @@ Ensure you write the task titles in the user's spoken language or English depend
 app.post('/api/companion-advice', async (req, res) => {
   try {
     const { personalityId, personalityName, systemInstruction, tasks, lang } = req.body;
-    const isHi = lang === 'hi';
+    const isHinglish = lang === 'hinglish';
 
     const apiKey = process.env.GEMINI_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
     if (!apiKey || apiKey.trim() === '') {
@@ -557,20 +566,20 @@ app.post('/api/companion-advice', async (req, res) => {
       let fallbackText = "";
 
       if (personalityId === 'mentor') {
-        fallbackText = isHi
-          ? `🌱 **नमस्ते दोस्त, मैं आपका सलाहकार हूँ।** आपके पास अभी ${pendingCount} लंबित कार्य हैं।\n\nविशेष रूप से, **"${criticalTasks[0]?.title || 'अपने मुख्य लक्ष्यों'}"** पर ध्यान दें। टालने की प्रवृत्ति प्राकृतिक है, लेकिन हम इसे छोटे-छोटे टुकड़ों में विभाजित करके और शांत दिमाग से काम करके दूर कर सकते हैं। \n\n*सलाह:* अपने सबसे महत्वपूर्ण कार्य के लिए एक 25 मिनट का केंद्रित सत्र शुरू करें। मैं आपके साथ हूँ!`
+        fallbackText = isHinglish
+          ? `🌱 **Hey friend, main aapka mentor hoon.** Aapke paas abhi ${pendingCount} pending tasks hain.\n\nKhaas taur par, **"${criticalTasks[0]?.title || 'apne core goals'}"** par dhyan dein. Tension hona natural hai, par hum ise small parts me break karke aaraam se handle kar sakte hain.\n\n*Advice:* Apne top goal ke liye ek simple 25-minute ka focus block start karein. Main aapke saath hoon!`
           : `🌱 **Hello friend, your Mentor here.** I see you have ${pendingCount} pending task(s) on your plate.\n\nSpecifically, let's look at **"${criticalTasks[0]?.title || 'your core objectives'}"**. Feeling overwhelmed is natural, but we can navigate this using small, gentle milestones. \n\n*Actionable Advice:* Pick your top critical goal, slice it into 3 microscopic steps, and let's run a single, relaxed Pomodoro block. You are capable of wonderful focus.`;
       } else if (personalityId === 'coach') {
-        fallbackText = isHi
-          ? `🔥 **चलो मैदान में उतरें!** आपके पास ${pendingCount} सक्रिय लक्ष्य हैं, और ${criticalTasks.length} अत्यधिक महत्वपूर्ण हैं।\n\n**"${criticalTasks[0]?.title || 'मुख्य कार्य'}"** को टालने का कोई बहाना नहीं चलेगा! हमारे पास समय कम है। \n\n*रणनीतिक योजना:* अभी पोमोडोरो टाइमर चालू करें, सभी सोशल मीडिया टैब बंद करें, और अगले 25 मिनट के लिए बिना रुके ध्यान केंद्रित करें। जब तक यह कार्य पूरा नहीं होता, तब तक पीछे नहीं हटना है!`
+        fallbackText = isHinglish
+          ? `🔥 **Chalo champion, speed badhao!** Aapke paas ${pendingCount} active goals hain, aur ${criticalTasks.length} bohot critical hain.\n\n**"${criticalTasks[0]?.title || 'main task'}"** ko procrastinate karne ka koi excuse nahi chalega! Time kam hai.\n\n*Game Plan:* Abhi timer start karein, saare distraction tabs close karein, aur agle 25 mins bina ruke pure focus se execute karein. No backtracking!`
           : `🔥 **Get in the zone! No excuses today.** You have ${pendingCount} active goals, and ${criticalTasks.length} are high-urgency threats.\n\nLet's tackle **"${criticalTasks[0]?.title || 'your main bottleneck'}"** head-on! \n\n*Execution Strategy:* Lock in, close all secondary browsers, trigger your timer right now, and give me 25 minutes of raw, uninterrupted execution. Procrastination ends when action begins. Let's crush this!`;
       } else if (personalityId === 'philosopher') {
-        fallbackText = isHi
-          ? `🌌 **विचारशील उपस्थिति का क्षण।** आपके वर्तमान क्षेत्र में ${pendingCount} अधूरे कार्य उपस्थित हैं।\n\n**"${criticalTasks[0]?.title || 'अस्तित्ववादी चुनौतियों'}"** का दबाव हमें वर्तमान क्षण से विचलित करता है। \n\n*दार्शनिक चिंतन:* भविष्य के परिणामों की चिंता करने के बजाय, केवल कार्य करने की शुद्ध क्रिया पर ध्यान दें। समय केवल एक भ्रम है—वास्तविक शक्ति इसी वर्तमान क्षण (Now) में केंद्रित है। शांत रहें और एक सांस लें।`
+        fallbackText = isHinglish
+          ? `🌌 **Ek shaant moment.** Aapke path me abhi ${pendingCount} unfinished intentions hain.\n\n**"${criticalTasks[0]?.title || 'is workload'}"** ki tension hume present moment se door karti hai.\n\n*Stoic Wisdom:* Future outcome ki tension chhodkar, sirf kaam karne ke action par focus karein. Time ek illusion hai—real power present moment me hi hai. Ek deep breath lein.`
           : `🌌 **A moment of quiet contemplation.** There are ${pendingCount} unrealized intentions in your path.\n\nYour mind might be anxious about **"${criticalTasks[0]?.title || 'these worldly demands'}"**, but the burden is merely weightless anticipation.\n\n*Wisdom Accent:* Strip away the vanity of outcomes. Focus purely on the singular act of doing. Let go of the pressure to finish, and sink entirely into the process of starting. Breath in, breath out.`;
       } else {
-        fallbackText = isHi
-          ? `🎨 **रचनात्मक विचार मंथन!** आपके क्षेत्र में ${pendingCount} लक्ष्य बिखरे हुए हैं।\n\nचलो **"${criticalTasks[0]?.title || 'इस रचनात्मक परियोजना'}"** को एक नया मोड़ देते हैं! \n\n*अपरंपरागत विचार:* इसे एक खेल की तरह खेलें। क्या आप इसे रिकॉर्ड समय में पूरा कर सकते हैं? इसे एक कलाकृति या पहेली की तरह समझें। लीक से हटकर सोचें और मजे करें!`
+        fallbackText = isHinglish
+          ? `🎨 **Creative Brainstorming Session!** Aapke workspace me abhi ${pendingCount} goals bikhre hue hain.\n\nChalo **"${criticalTasks[0]?.title || 'is creative project'}"** ko thoda exciting banate hain!\n\n*Gamified Shortcut:* Ise ek game ki tarah play karein. Kya aap ise record time me kar sakte hain? Rote-learning chhodkar out-of-the-box sochein aur enjoy karein!`
           : `🎨 **Creative Brainstorm Unleashed!** You have ${pendingCount} fascinating canvases (tasks) waiting.\n\nLet's gamify **"${criticalTasks[0]?.title || 'this challenge'}"** to make it ridiculously fun!\n\n*Playful Shortcut:* Can you complete this under a self-imposed speedrun rule? Give yourself a silly reward, change your working environment, or sketch out your thoughts before typing. Let's make progress feel like play!`;
       }
 
@@ -590,7 +599,7 @@ app.post('/api/companion-advice', async (req, res) => {
 - philosopher: stoic, wise, deep, contemplative, poetic, discussing the present moment, time, and flow state.
 - creative: playful, erratic, full of out-of-the-box suggestions, gamifying productivity, using artistic metaphors.
 
-Analyze the user's current task list and provide a highly contextual, active brainstorm advice. Do NOT be generic. Directly reference their tasks. Speak directly to the user in ${isHi ? 'Hindi' : 'English'}. Include clear markdown bullet points, action ideas, and emotional pacing.`;
+Analyze the user's current task list and provide a highly contextual, active brainstorm advice. Do NOT be generic. Directly reference their tasks. Speak directly to the user in ${isHinglish ? 'Hinglish language (casual mix of Hindi and English in Roman/Latin script, e.g. "Aapke paas kuch pending tasks hain. Tension mat lein, focus karein.")' : 'English'}. Include clear markdown bullet points, action ideas, and emotional pacing.`;
 
     const prompt = `Here is my current state:
 Active tasks:
@@ -599,7 +608,7 @@ ${pendingTasksText}
 Please give me an interactive, tailored, and active brainstorm session of advice as my chosen companion. Address me directly with your personality style. Include a couple of fun, highly specific feature/action ideas I can try right now. Keep it around 150-200 words.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.5-flash',
       contents: prompt,
       config: {
         systemInstruction: systemPrompt,
@@ -615,6 +624,177 @@ Please give me an interactive, tailored, and active brainstorm session of advice
     if (error.status === 401 || error.message?.includes('401') || error.message?.includes('invalid authentication credentials')) {
       return res.status(401).json({ error: "Invalid Gemini API Key. Please check your settings." });
     }
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// 3.85 Text-to-Speech (TTS) Endpoint powered by gemini-3.1-flash-tts-preview
+app.post('/api/tts', async (req, res) => {
+  try {
+    const { text, personalityId, voice } = req.body;
+    if (!text) {
+      return res.status(400).json({ error: 'Missing text to synthesize' });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
+    if (!apiKey || apiKey.trim() === '') {
+      return res.status(401).json({ error: "Missing Gemini API Key. Please configure it in your Settings > Secrets panel." });
+    }
+
+    // Map personalities or custom voices to Gemini prebuilt voices:
+    // 'Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr'
+    let voiceName = 'Kore'; // Default (empathic / warm)
+    if (voice) {
+      voiceName = voice;
+    } else if (personalityId) {
+      if (personalityId === 'coach') {
+        voiceName = 'Puck'; // high energy, driving
+      } else if (personalityId === 'philosopher') {
+        voiceName = 'Charon'; // slow, deep, contemplative
+      } else if (personalityId === 'mentor') {
+        voiceName = 'Kore'; // soothing, empathetic
+      } else if (personalityId === 'creative') {
+        voiceName = 'Kore'; // natural, friendly, clear English (replaces Zephyr which has a non-English accent)
+      }
+    }
+
+    const ai = getGeminiClient();
+
+    // Generate high fidelity natural audio using the Gemini TTS model
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.1-flash-tts-preview',
+      contents: [{ parts: [{ text: text }] }],
+      config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: voiceName },
+          },
+        },
+      },
+    });
+
+    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    const mimeType = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.mimeType || 'audio/wav';
+
+    if (base64Audio) {
+      return res.json({
+        audioData: base64Audio,
+        mimeType: mimeType,
+        voiceUsed: voiceName
+      });
+    } else {
+      return res.status(500).json({ error: "No audio generated by the TTS model" });
+    }
+
+  } catch (error: any) {
+    console.error('Error in tts endpoint:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// 3.9 AI 5-Minute Micro-Start Endpoint
+app.post('/api/micro-start', async (req, res) => {
+  try {
+    const { taskTitle, category, companionPersonality, personality, lang } = req.body;
+    if (!taskTitle) {
+      return res.status(400).json({ error: 'Missing taskTitle' });
+    }
+
+    const resolvedPersonality = companionPersonality || (typeof personality === 'object' ? personality?.id : personality) || 'mentor';
+    const isHinglish = lang === 'hinglish';
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
+
+    if (!apiKey || apiKey.trim() === '') {
+      console.log("Simulating high-fidelity 5-minute micro-start fallback...");
+      
+      const titleLower = taskTitle.toLowerCase();
+      let microAction = "";
+      let encouragement = "";
+
+      if (titleLower.includes('write') || titleLower.includes('report') || titleLower.includes('essay') || titleLower.includes('paper') || titleLower.includes('doc')) {
+        microAction = isHinglish
+          ? `Apna document ya text editor open karein, use title dein, aur introduction ke baare me sirf ek seedhi-saadhi line likhein.`
+          : `Open your document or text editor, give it a title, and write just one simple sentence about the introduction.`;
+      } else if (titleLower.includes('study') || titleLower.includes('read') || titleLower.includes('book') || titleLower.includes('learn') || titleLower.includes('course')) {
+        microAction = isHinglish
+          ? `Apni book ya study portal open karein, pehla page nikaalein, aur sirf ek paragraph ya heading read karein.`
+          : `Open your book or learning portal to the first page, and read just one single paragraph or the chapter outlines.`;
+      } else if (titleLower.includes('code') || titleLower.includes('develop') || titleLower.includes('program') || titleLower.includes('build') || titleLower.includes('bug') || titleLower.includes('fix')) {
+        microAction = isHinglish
+          ? `Apna VS Code ya IDE open karein, code repository pull karein, aur bas ek comment line likhein ki aap kya karne wale hain.`
+          : `Open your IDE/editor, pull the codebase, and write just one single line of comment explaining what you plan to do.`;
+      } else if (titleLower.includes('clean') || titleLower.includes('room') || titleLower.includes('wash') || titleLower.includes('organize') || titleLower.includes('tidy')) {
+        microAction = isHinglish
+          ? `Aaspaas dekhein, koi bhi ek cheez uthakar uski sahi jagah par rakh dein. Bas ek cheez.`
+          : `Look around your desk, pick up exactly one physical object, and place it in its proper spot. Just one item.`;
+      } else {
+        microAction = isHinglish
+          ? `Aapne jo task socha hai use shuru karne ke liye, apne computer ya desk par sirf wahi ek cheez open karein aur 2 minute ke liye dekhein.`
+          : `To start this task, clear all other tabs on your screen, open only the single workspace tool you need, and interact with it for just 2 minutes.`;
+      }
+
+      if (resolvedPersonality === 'coach') {
+        encouragement = isHinglish 
+          ? `🔥 Momentum hi sab kuch hai champion! Abhi start karo aur aage badho!`
+          : `🔥 Momentum is everything champion! Open it right now and crush the first step!`;
+      } else if (resolvedPersonality === 'philosopher') {
+        encouragement = isHinglish
+          ? `🌌 Shuruat karna hi sabse bada block hai. Pehla kadam uthao, baki sab apne aap behne lagega.`
+          : `🌌 The heavy part is only the transition. Step across the threshold; flow will follow.`;
+      } else if (resolvedPersonality === 'creative') {
+        encouragement = isHinglish
+          ? `🎨 Ek game ki tarah shuru karein! Apne workspace ko super simple banao aur maze karo.`
+          : `🎨 Let's gamify the entrance! Make the absolute smallest, funniest first move.`;
+      } else {
+        encouragement = isHinglish
+          ? `🌱 Choti shuruaat hi bade badlav laati hai. Tension mat lein, bas ek line se shuru karein.`
+          : `🌱 Small starts release big friction. Take a deep breath and take just one simple step.`;
+      }
+
+      return res.json({ microAction, encouragement });
+    }
+
+    const ai = getGeminiClient();
+    const systemPrompt = `You are an expert productivity coach. Your job is to take a task name/title and generate:
+1. "microAction": The absolute easiest, lowest-friction, physical or digital step that can be completed in under 5 minutes to overcome starting friction. (e.g. for "Write final project report", it would be "Open a Google Doc, title it 'Final Report', and write just one sentence about the introduction.").
+2. "encouragement": A super short, powerful booster sentence matching the tone of the user's productivity companion ("${resolvedPersonality || 'mentor'}").
+   - mentor: empathetic, supportive, relaxing.
+   - coach: intense, high-energy, active, tough-love.
+   - philosopher: contemplative, stoic, mindfulness-based.
+   - creative: fun, gamified, experimental.
+
+Speak directly to the user in ${isHinglish ? 'Hinglish (Hindi mixed with English, written in the Latin alphabet)' : 'English'}. Return valid JSON matching the schema.`;
+
+    const prompt = `Task: "${taskTitle}"
+Category: "${category || 'General'}"
+Companion personality: "${resolvedPersonality || 'mentor'}"
+
+Analyze this task and generate the 5-minute Micro-Start action.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.5-flash',
+      contents: prompt,
+      config: {
+        systemInstruction: systemPrompt,
+        temperature: 0.75,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            microAction: { type: Type.STRING, description: "A very easy 5-minute starter action" },
+            encouragement: { type: Type.STRING, description: "A brief encouragement sentence in the personality's tone" }
+          },
+          required: ["microAction", "encouragement"]
+        }
+      }
+    });
+
+    const parsed = JSON.parse((response.text || '{}').trim());
+    return res.json(parsed);
+
+  } catch (error: any) {
+    console.error('Error in micro-start endpoint:', error);
     return res.status(500).json({ error: error.message });
   }
 });

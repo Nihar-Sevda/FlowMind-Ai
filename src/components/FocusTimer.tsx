@@ -1,19 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { TimerMode } from '../types';
 import { synthManager } from '../utils/audioSynth';
-import { Play, Pause, RotateCcw, Volume2, VolumeX, Eye, Flame, Moon, Sparkles, Music, Mic, MicOff } from 'lucide-react';
+import { Play, Pause, RotateCcw, Volume2, VolumeX, Eye, Flame, Moon, Sparkles, Music, Mic, MicOff, Settings, ShieldAlert, Sliders, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface FocusTimerProps {
   onSessionComplete?: (mode: TimerMode) => void;
   accentColor?: string;
   borderColor?: string;
+  onNuclearLockStateChange?: (locked: boolean) => void;
 }
-
-const MODE_TIMES: Record<TimerMode, number> = {
-  work: 25 * 60,
-  shortBreak: 5 * 60,
-  longBreak: 15 * 60,
-};
 
 const MODE_LABELS: Record<TimerMode, string> = {
   work: 'Work Session',
@@ -21,11 +16,39 @@ const MODE_LABELS: Record<TimerMode, string> = {
   longBreak: 'Long Break',
 };
 
-export default function FocusTimer({ onSessionComplete, accentColor = 'bg-indigo-600', borderColor = 'border-indigo-500' }: FocusTimerProps) {
+export default function FocusTimer({ onSessionComplete, accentColor = 'bg-indigo-600', borderColor = 'border-indigo-500', onNuclearLockStateChange }: FocusTimerProps) {
+  const [customTimes, setCustomTimes] = useState<Record<TimerMode, number>>(() => {
+    const saved = localStorage.getItem('flowmind_custom_timer_modes');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {}
+    }
+    return {
+      work: 25 * 60,
+      shortBreak: 5 * 60,
+      longBreak: 15 * 60,
+    };
+  });
+
+  const [nuclearEnabled, setNuclearEnabled] = useState<boolean>(() => {
+    return localStorage.getItem('flowmind_nuclear_enabled') === 'true';
+  });
+
+  const [showSettings, setShowSettings] = useState<boolean>(false);
+
   const [mode, setMode] = useState<TimerMode>('work');
-  const [secondsLeft, setSecondsLeft] = useState<number>(MODE_TIMES.work);
+  const [secondsLeft, setSecondsLeft] = useState<number>(() => {
+    const saved = localStorage.getItem('flowmind_custom_timer_modes');
+    if (saved) {
+      try {
+        return JSON.parse(saved).work;
+      } catch {}
+    }
+    return 25 * 60;
+  });
   const [isRunning, setIsRunning] = useState<boolean>(false);
-  const [ambientSound, setAmbientSound] = useState<'none' | 'rain' | 'drone' | 'ocean'>('none');
+  const [ambientSound, setAmbientSound] = useState<'none' | 'rain' | 'thunderstorm' | 'drone' | 'brownnoise' | 'lofi' | 'lofi2'>('none');
   const [isAudioMuted, setIsAudioMuted] = useState<boolean>(false);
   const [voiceCommandsActive, setVoiceCommandsActive] = useState<boolean>(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -34,6 +57,23 @@ export default function FocusTimer({ onSessionComplete, accentColor = 'bg-indigo
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    localStorage.setItem('flowmind_custom_timer_modes', JSON.stringify(customTimes));
+  }, [customTimes]);
+
+  useEffect(() => {
+    localStorage.setItem('flowmind_nuclear_enabled', String(nuclearEnabled));
+  }, [nuclearEnabled]);
+
+  const isNuclearActive = nuclearEnabled && isRunning && mode === 'work';
+
+  useEffect(() => {
+    onNuclearLockStateChange?.(isNuclearActive);
+    return () => {
+      onNuclearLockStateChange?.(false);
+    };
+  }, [isNuclearActive, onNuclearLockStateChange]);
 
   // Synchronise voice recognition lifecycle
   useEffect(() => {
@@ -66,7 +106,7 @@ export default function FocusTimer({ onSessionComplete, accentColor = 'bg-indigo
           setTimeout(() => setCommandFeedback(''), 3000);
         } else if (transcript.includes('reset') || transcript.includes('restart') || transcript.includes('clear')) {
           setIsRunning(false);
-          setSecondsLeft(MODE_TIMES[mode]);
+          setSecondsLeft(customTimes[mode]);
           setCommandFeedback('Triggered: Reset Timer 🔄');
           setTimeout(() => setCommandFeedback(''), 3000);
         }
@@ -119,8 +159,8 @@ export default function FocusTimer({ onSessionComplete, accentColor = 'bg-indigo
   // Synchronise timer initial seconds when mode changes
   useEffect(() => {
     setIsRunning(false);
-    setSecondsLeft(MODE_TIMES[mode]);
-  }, [mode]);
+    setSecondsLeft(customTimes[mode]);
+  }, [mode, customTimes]);
 
   // Handle countdown logic
   useEffect(() => {
@@ -154,10 +194,16 @@ export default function FocusTimer({ onSessionComplete, accentColor = 'bg-indigo
     } else {
       if (ambientSound === 'rain') {
         synthManager.playRain();
+      } else if (ambientSound === 'thunderstorm') {
+        synthManager.playThunderstorm();
       } else if (ambientSound === 'drone') {
         synthManager.playZenDrone();
-      } else if (ambientSound === 'ocean') {
-        synthManager.playOcean();
+      } else if (ambientSound === 'brownnoise') {
+        synthManager.playBrownNoise();
+      } else if (ambientSound === 'lofi') {
+        synthManager.playLofi();
+      } else if (ambientSound === 'lofi2') {
+        synthManager.playLofi2();
       }
     }
   }, [isRunning, ambientSound, isAudioMuted]);
@@ -224,7 +270,15 @@ export default function FocusTimer({ onSessionComplete, accentColor = 'bg-indigo
 
   const resetTimer = () => {
     setIsRunning(false);
-    setSecondsLeft(MODE_TIMES[mode]);
+    setSecondsLeft(customTimes[mode]);
+  };
+
+  const handleTimeChange = (modeKey: TimerMode, mins: number) => {
+    const seconds = Math.max(1, Math.min(180, mins)) * 60;
+    setCustomTimes(prev => ({ ...prev, [modeKey]: seconds }));
+    if (mode === modeKey) {
+      setSecondsLeft(seconds);
+    }
   };
 
   const selectMode = (newMode: TimerMode) => {
@@ -243,7 +297,7 @@ export default function FocusTimer({ onSessionComplete, accentColor = 'bg-indigo
   };
 
   // Calculate percentage progress
-  const totalSeconds = MODE_TIMES[mode];
+  const totalSeconds = customTimes[mode];
   const progressPercent = ((totalSeconds - secondsLeft) / totalSeconds) * 100;
 
   return (
@@ -259,24 +313,27 @@ export default function FocusTimer({ onSessionComplete, accentColor = 'bg-indigo
         </div>
         
         {/* Ambient audio selection */}
-        <div className="flex items-center gap-2 bg-zinc-50 dark:bg-zinc-950 px-3 py-1.5 rounded-2xl border border-zinc-100 dark:border-zinc-850">
-          <Music className="w-4 h-4 text-zinc-400" />
+        <div className="flex items-center gap-2 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 px-3 py-1.5 rounded-2xl border border-indigo-100 dark:border-indigo-900/60 transition-all duration-300 shadow-sm hover:border-indigo-200 hover:bg-indigo-100/50">
+          <Music className="w-4 h-4 text-indigo-500 animate-pulse" />
           <select
             id="ambient-sound-select"
             value={ambientSound}
             onChange={(e) => setAmbientSound(e.target.value as any)}
-            className="text-xs bg-transparent border-none text-zinc-600 dark:text-zinc-300 focus:outline-none cursor-pointer font-sans font-medium"
+            className="text-xs bg-transparent border-none text-indigo-700 dark:text-indigo-300 focus:outline-none cursor-pointer font-sans font-semibold"
           >
-            <option value="none">Silence</option>
-            <option value="rain">Natural Rain</option>
-            <option value="drone">Zen Drone</option>
-            <option value="ocean">Ocean Waves</option>
+            <option value="none" className="bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200">Silence</option>
+            <option value="rain" className="bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200">Natural Rain</option>
+            <option value="thunderstorm" className="bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200">Stormy Rain</option>
+            <option value="drone" className="bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200">Zen Drone</option>
+            <option value="brownnoise" className="bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200">Brown Noise</option>
+            <option value="lofi" className="bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200">Lofi Beats</option>
+            <option value="lofi2" className="bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200">Lofi Beats 2</option>
           </select>
 
           {ambientSound !== 'none' && (
             <button
               onClick={toggleMute}
-              className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded text-zinc-500 dark:text-zinc-400 transition-colors"
+              className="p-1 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 rounded text-indigo-600 dark:text-indigo-400 transition-colors"
               title={isAudioMuted ? "Unmute ambience" : "Mute ambience"}
             >
               {isAudioMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
@@ -328,7 +385,7 @@ export default function FocusTimer({ onSessionComplete, accentColor = 'bg-indigo
       <div className="flex items-center justify-center gap-4 mt-6">
         <button
           onClick={resetTimer}
-          className="p-3 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 rounded-2xl transition-all duration-200 active:scale-95"
+          className="p-3 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 rounded-2xl transition-all duration-200 active:scale-95 cursor-pointer"
           title="Reset Timer"
         >
           <RotateCcw className="w-5 h-5" />
@@ -337,7 +394,7 @@ export default function FocusTimer({ onSessionComplete, accentColor = 'bg-indigo
         <button
           id="btn-play-pause-timer"
           onClick={toggleTimer}
-          className={`px-8 py-3.5 rounded-2xl font-sans font-semibold flex items-center gap-2 shadow-md transition-all duration-200 active:scale-95 text-white ${
+          className={`flex-1 max-w-[180px] py-3.5 rounded-2xl font-sans font-semibold flex items-center justify-center gap-2 shadow-md transition-all duration-200 active:scale-95 text-white cursor-pointer ${
             isRunning 
               ? 'bg-zinc-900 dark:bg-zinc-100 dark:text-zinc-900 hover:opacity-90' 
               : `${accentColor} hover:opacity-90`
@@ -355,7 +412,93 @@ export default function FocusTimer({ onSessionComplete, accentColor = 'bg-indigo
             </>
           )}
         </button>
+
+        <button
+          onClick={() => setShowSettings(!showSettings)}
+          className={`p-3 border rounded-2xl transition-all duration-200 active:scale-95 cursor-pointer ${
+            showSettings
+              ? 'bg-indigo-50 dark:bg-indigo-950/20 text-indigo-500 border-indigo-200 dark:border-indigo-900'
+              : 'border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400'
+          }`}
+          title="Customize Focus Space"
+        >
+          <Settings className={`w-5 h-5 ${showSettings ? 'rotate-45' : ''} transition-transform duration-200`} />
+        </button>
       </div>
+
+      {/* Collapsible Customization and Nuclear Option settings panel */}
+      {showSettings && (
+        <div className="mt-6 p-4 bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-150 dark:border-zinc-850 rounded-2xl space-y-4 animate-in slide-in-from-top-2 duration-200 text-left">
+          <div className="flex items-center justify-between border-b border-zinc-150 dark:border-zinc-800 pb-2">
+            <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200 flex items-center gap-1.5">
+              <Sliders className="w-3.5 h-3.5 text-indigo-500" />
+              Customize Focus Intervals
+            </span>
+            <span className="text-[10px] font-mono text-zinc-400 uppercase">Durations (Mins)</span>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-[9px] font-mono text-zinc-400 uppercase mb-1">Focus</label>
+              <input
+                type="number"
+                min="1"
+                max="180"
+                value={Math.round(customTimes.work / 60)}
+                onChange={(e) => handleTimeChange('work', parseInt(e.target.value) || 25)}
+                className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[9px] font-mono text-zinc-400 uppercase mb-1">Short Brk</label>
+              <input
+                type="number"
+                min="1"
+                max="180"
+                value={Math.round(customTimes.shortBreak / 60)}
+                onChange={(e) => handleTimeChange('shortBreak', parseInt(e.target.value) || 5)}
+                className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[9px] font-mono text-zinc-400 uppercase mb-1">Long Brk</label>
+              <input
+                type="number"
+                min="1"
+                max="180"
+                value={Math.round(customTimes.longBreak / 60)}
+                onChange={(e) => handleTimeChange('longBreak', parseInt(e.target.value) || 15)}
+                className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+          </div>
+
+          {/* Nuclear Option Toggle */}
+          <div className="flex items-center justify-between p-3 bg-red-50/20 dark:bg-red-950/5 border border-red-200/20 dark:border-red-950/20 rounded-xl">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 bg-red-100/55 dark:bg-red-950/30 text-red-600 dark:text-red-400 rounded-lg">
+                <ShieldAlert className="w-4 h-4 text-red-500" />
+              </div>
+              <div className="text-left">
+                <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200 block">Nuclear Option Lock</span>
+                <span className="text-[10px] text-zinc-500 block leading-tight">Blocks tab switching during active Pomodoro work</span>
+              </div>
+            </div>
+            <button
+              onClick={() => setNuclearEnabled(!nuclearEnabled)}
+              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                nuclearEnabled ? 'bg-red-500' : 'bg-zinc-200 dark:bg-zinc-800'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  nuclearEnabled ? 'translate-x-4' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Comforting Voice-Activated session controls */}
       <div className="mt-8 pt-6 border-t border-zinc-100 dark:border-zinc-850">

@@ -50,6 +50,7 @@ import {
   Notebook,
   ChevronLeft,
   ChevronRight,
+  Music,
   HelpCircle as InfoIcon
 } from 'lucide-react';
 
@@ -83,8 +84,63 @@ export default function App() {
   });
   const [onboardingStep, setOnboardingStep] = useState<'intro' | 'quiz'>('intro');
 
+  // Custom Category Colors
+  const [categoryColors, setCategoryColors] = useState<Record<string, string>>(() => {
+    const saved = localStorage.getItem('flowmind_category_colors');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {}
+    }
+    return {
+      'Engineering': '#3b82f6',
+      'Crisis': '#ef4444',
+      'Creative': '#ec4899',
+      'Wellness Break': '#10b981',
+      'AI Suggestion': '#8b5cf6',
+      'Life': '#f97316',
+      'Study': '#14b8a6',
+    };
+  });
+
+  const [availableCategories, setAvailableCategories] = useState<string[]>(() => {
+    const saved = localStorage.getItem('flowmind_available_categories');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {}
+    }
+    return ['Engineering', 'Crisis', 'Creative', 'Wellness Break', 'AI Suggestion', 'Life', 'Study'];
+  });
+
+  const [activeColorEditingCategory, setActiveColorEditingCategory] = useState<string | null>(null);
+
+  // Nuclear Option Lock State
+  const [isNuclearLocked, setIsNuclearLocked] = useState<boolean>(false);
+
   // Active navigation tab
   const [activeTab, setActiveTab] = useState<'dashboard' | 'planner' | 'focus' | 'calendar' | 'notes'>( 'dashboard' );
+
+  // Safe tab switcher wrapper for Nuclear Option
+  const handleTabChange = (tab: 'dashboard' | 'planner' | 'focus' | 'calendar' | 'notes') => {
+    if (isNuclearLocked && activeTab === 'focus') {
+      showToast(
+        lang === 'hinglish'
+          ? '🚨 NUCLEAR OPTION LOCK ACTIVE! Aap timer khatam hone se pehle doosre tab me nahi jaa sakte!'
+          : '🚨 NUCLEAR OPTION LOCK ACTIVE! You cannot switch screens until the current focus session completes!'
+      );
+      return;
+    }
+    setActiveTab(tab);
+  };
+
+  useEffect(() => {
+    localStorage.setItem('flowmind_category_colors', JSON.stringify(categoryColors));
+  }, [categoryColors]);
+
+  useEffect(() => {
+    localStorage.setItem('flowmind_available_categories', JSON.stringify(availableCategories));
+  }, [availableCategories]);
 
   // Sidebar collapsed state
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
@@ -182,10 +238,83 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState<string>('');
   const [selectedTaskForFocus, setSelectedTaskForFocus] = useState<string>('');
 
-  // Language support ('en' | 'hi')
-  const [lang, setLang] = useState<'en' | 'hi'>(() => {
-    return (localStorage.getItem('flowmind_lang') as 'en' | 'hi') || 'en';
+  // 5-Minute Micro-Start results
+  const [microStarts, setMicroStarts] = useState<Record<string, { action: string; encouragement: string; loading: boolean }>>({});
+
+  const handleMicroStart = async (task: Task) => {
+    // Set loading state for this task
+    setMicroStarts(prev => ({
+      ...prev,
+      [task.id]: { action: '', encouragement: '', loading: true }
+    }));
+
+    try {
+      const response = await fetch('/api/micro-start', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          taskTitle: task.title,
+          personality: currentPersonality,
+          category: task.category,
+          lang: lang
+        })
+      });
+
+      if (!response.ok) throw new Error('Failed to fetch micro-start');
+
+      const data = await response.json();
+      setMicroStarts(prev => ({
+        ...prev,
+        [task.id]: {
+          action: data.action || 'Just spend 5 minutes preparing your materials.',
+          encouragement: data.encouragement || 'You got this!',
+          loading: false
+        }
+      }));
+    } catch (err) {
+      console.error(err);
+      setMicroStarts(prev => ({
+        ...prev,
+        [task.id]: {
+          action: 'Open your primary workspace, set a 5-minute timer, and do just one tiny subtask.',
+          encouragement: 'Starting is 95% of the battle. Break the ice now!',
+          loading: false
+        }
+      }));
+    }
+  };
+
+  // Language support ('en' | 'hinglish')
+  const [lang, setLang] = useState<'en' | 'hinglish'>(() => {
+    return (localStorage.getItem('flowmind_lang') as 'en' | 'hinglish') || 'en';
   });
+
+  const handleToggleLang = () => {
+    const nextLang = lang === 'en' ? 'hinglish' : 'en';
+    setLang(nextLang);
+    localStorage.setItem('flowmind_lang', nextLang);
+  };
+
+  // Browser-level exit interception hook
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isNuclearLocked && activeTab === 'focus') {
+        const message = lang === 'hinglish'
+          ? '🚨 WARNING: Nuclear Lock active hai! Agar aap abhi exit karenge toh aapka current focus session reset ho jayega!'
+          : '🚨 WARNING: Nuclear Option Lock is active! Exiting or reloading now will interrupt your focus block and reset your streak!';
+        e.preventDefault();
+        e.returnValue = message;
+        return message;
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isNuclearLocked, activeTab, lang]);
 
   // Track the previous user id to manage transitions
   const [prevUserId, setPrevUserId] = useState<string | null>(null);
@@ -254,7 +383,7 @@ export default function App() {
     setIsZenCooldownActive(active);
     localStorage.setItem('flowmind_zen_cooldown', String(active));
     if (active) {
-      showToast(lang === 'hi' ? "ध्यानपूर्ण शीतलन (Zen Cooldown) सक्रिय हुआ!" : "Zen Cooldown Rest Mode activated!", () => {
+      showToast(lang === 'hinglish' ? "Zen Cooldown Rest Mode active ho gaya hai!" : "Zen Cooldown Rest Mode activated!", () => {
         setIsZenCooldownActive(false);
         localStorage.setItem('flowmind_zen_cooldown', 'false');
       });
@@ -342,9 +471,9 @@ export default function App() {
       if (permission === 'granted') {
         setNotificationsEnabled(true);
         localStorage.setItem('flowmind_notifications', 'true');
-        const title = lang === 'hi' ? '🔔 सूचनाएं सक्रिय हैं!' : '🔔 Reminders Enabled!';
-        const body = lang === 'hi'
-          ? 'फ्लोमाइंड अब आपको आपके समयसीमा कार्यों के बारे में याद दिलाएगा।'
+        const title = lang === 'hinglish' ? '🔔 Notifications active hain!' : '🔔 Reminders Enabled!';
+        const body = lang === 'hinglish'
+          ? 'FlowMind ab aapko critical deadlines ke baare me update rakhega.'
           : 'FlowMind will now keep you accountable for critical deadlines.';
         try {
           new Notification(title, { body });
@@ -356,7 +485,7 @@ export default function App() {
         localStorage.setItem('flowmind_notifications', 'false');
       }
     } else {
-      alert(lang === 'hi' ? 'यह ब्राउज़र पुश सूचनाओं का समर्थन नहीं करता है।' : 'This browser does not support push notifications.');
+      alert(lang === 'hinglish' ? 'Yeh browser notifications support nahi karta.' : 'This browser does not support push notifications.');
     }
   };
 
@@ -368,9 +497,9 @@ export default function App() {
       const pendingUrgent = tasks.filter(t => !t.completed && (t.urgency === 'critical' || t.urgency === 'high'));
       if (pendingUrgent.length > 0) {
         const primary = pendingUrgent[0];
-        const title = lang === 'hi' ? '⚠️ समयसीमा अनुस्मारक' : '⚠️ Critical Deadline Pending';
-        const body = lang === 'hi'
-          ? `आपके पास एक महत्वपूर्ण लंबित कार्य है: "${primary.title}"। कृपया इसे पूरा करें!`
+        const title = lang === 'hinglish' ? '⚠️ Deadline Reminder' : '⚠️ Critical Deadline Pending';
+        const body = lang === 'hinglish'
+          ? `Aapka critical task pending hai: "${primary.title}"! Please ise check karein.`
           : `Do not postpone! Your high-stakes task is pending: "${primary.title}".`;
         
         if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
@@ -562,10 +691,10 @@ export default function App() {
     setTasks(prev => prev.filter(t => t.id !== id));
 
     showToast(
-      lang === 'hi' ? `कार्य "${taskToDelete.title}" हटा दिया गया।` : `Deleted task "${taskToDelete.title}".`,
+      lang === 'hinglish' ? `Task "${taskToDelete.title}" delete ho gaya hai.` : `Deleted task "${taskToDelete.title}".`,
       () => {
         setTasks(prev => [...prev, taskToDelete]);
-        showToast(lang === 'hi' ? "कार्य पुनः स्थापित किया गया!" : "Task restored successfully!");
+        showToast(lang === 'hinglish' ? "Task successfully restore ho gaya!" : "Task restored successfully!");
       }
     );
   };
@@ -708,7 +837,7 @@ export default function App() {
   // Launch any task into active focus timer
   const handleLaunchFocusForTask = (task: Task) => {
     setSelectedTaskForFocus(task.title);
-    setActiveTab('focus');
+    handleTabChange('focus');
   };
 
   // Calculate day difference for countdowns
@@ -1055,7 +1184,7 @@ export default function App() {
         {/* Main Navigation Links */}
         <nav className="flex-1 px-4 space-y-1.5 py-4">
           <button
-            onClick={() => setActiveTab('dashboard')}
+            onClick={() => handleTabChange('dashboard')}
             className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3.5 py-2.5'} text-xs font-medium rounded-xl transition-all cursor-pointer ${
               activeTab === 'dashboard'
                 ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-850 shadow-sm'
@@ -1068,7 +1197,7 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setActiveTab('planner')}
+            onClick={() => handleTabChange('planner')}
             className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3.5 py-2.5'} text-xs font-medium rounded-xl transition-all cursor-pointer ${
               activeTab === 'planner'
                 ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-850 shadow-sm'
@@ -1087,7 +1216,7 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setActiveTab('focus')}
+            onClick={() => handleTabChange('focus')}
             className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3.5 py-2.5'} text-xs font-medium rounded-xl transition-all cursor-pointer ${
               activeTab === 'focus'
                 ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-850 shadow-sm'
@@ -1100,7 +1229,7 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setActiveTab('calendar')}
+            onClick={() => handleTabChange('calendar')}
             className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3.5 py-2.5'} text-xs font-medium rounded-xl transition-all cursor-pointer ${
               activeTab === 'calendar'
                 ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-850 shadow-sm'
@@ -1113,7 +1242,7 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setActiveTab('notes')}
+            onClick={() => handleTabChange('notes')}
             className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3.5 py-2.5'} text-xs font-medium rounded-xl transition-all cursor-pointer ${
               activeTab === 'notes'
                 ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-850 shadow-sm'
@@ -1124,6 +1253,8 @@ export default function App() {
             <Notebook className="w-4 h-4 text-emerald-400" />
             {!sidebarCollapsed && <span>{t('quickNotes')}</span>}
           </button>
+
+
         </nav>
 
         {/* Sidebar Footer Controls */}
@@ -1140,11 +1271,11 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => setLang(lang === 'en' ? 'hi' : 'en')}
+                onClick={handleToggleLang}
                 className="w-8 h-8 flex items-center justify-center text-[10px] font-mono font-bold bg-zinc-100 dark:bg-zinc-950 text-indigo-600 dark:text-indigo-400 border border-zinc-200 dark:border-zinc-900 rounded-xl transition-all cursor-pointer shadow-sm"
-                title="Change Language / भाषा बदलें"
+                title="Change Language / Hinglish"
               >
-                {lang === 'en' ? 'EN' : 'हिं'}
+                {lang === 'en' ? 'EN' : 'HIN'}
               </button>
 
               <button
@@ -1180,13 +1311,13 @@ export default function App() {
               <div className="flex items-center justify-between p-1 bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl">
                 <span className="text-[10px] text-zinc-500 pl-2 font-mono flex items-center gap-1.5">
                   <Languages className="w-3.5 h-3.5 text-indigo-500" />
-                  Language / भाषा
+                  Language
                 </span>
                 <button
-                  onClick={() => setLang(lang === 'en' ? 'hi' : 'en')}
+                  onClick={handleToggleLang}
                   className="px-2 py-0.5 text-[9px] font-mono font-bold bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 border border-zinc-250 dark:border-zinc-800 rounded-lg transition-all cursor-pointer shadow-sm"
                 >
-                  {lang === 'en' ? 'EN' : 'हिं'}
+                  {lang === 'en' ? 'EN' : 'Hinglish'}
                 </button>
               </div>
 
@@ -1309,6 +1440,8 @@ export default function App() {
 
 
 
+
+
             <div className="text-right hidden md:block">
               <span className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider block">Crisis Triage Clock</span>
               <span className="text-xs text-zinc-800 dark:text-zinc-300 font-mono font-bold">{currentTime || 'Locked...'}</span>
@@ -1384,7 +1517,7 @@ export default function App() {
                 </div>
 
                 {/* Tactical Slide to Unlock / Metaphorical Slider */}
-                <div className="space-y-4 text-center">
+                <div className="space-y-4 text-center mt-6">
                   <div className="max-w-md mx-auto">
                     <SlideToUnlock onUnlocked={() => setOnboardingStep('quiz')} />
                   </div>
@@ -1415,7 +1548,7 @@ export default function App() {
               {/* TAB CONTAINER FOR MOBILE VIEWPORTS */}
               <div className="flex md:hidden gap-1 p-1 bg-white/60 dark:bg-zinc-900/50 border border-zinc-200/80 dark:border-zinc-900 rounded-2xl mb-2 overflow-x-auto">
                 <button
-                  onClick={() => setActiveTab('dashboard')}
+                  onClick={() => handleTabChange('dashboard')}
                   className={`flex-1 py-2 text-[11px] font-sans rounded-xl font-medium whitespace-nowrap transition-all ${
                     activeTab === 'dashboard' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500'
                   }`}
@@ -1423,7 +1556,7 @@ export default function App() {
                   Overview
                 </button>
                 <button
-                  onClick={() => setActiveTab('planner')}
+                  onClick={() => handleTabChange('planner')}
                   className={`flex-1 py-2 text-[11px] font-sans rounded-xl font-medium whitespace-nowrap transition-all ${
                     activeTab === 'planner' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500'
                   }`}
@@ -1431,7 +1564,7 @@ export default function App() {
                   Planner
                 </button>
                 <button
-                  onClick={() => setActiveTab('focus')}
+                  onClick={() => handleTabChange('focus')}
                   className={`flex-1 py-2 text-[11px] font-sans rounded-xl font-medium whitespace-nowrap transition-all ${
                     activeTab === 'focus' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500'
                   }`}
@@ -1439,7 +1572,7 @@ export default function App() {
                   Focus Space
                 </button>
                 <button
-                  onClick={() => setActiveTab('calendar')}
+                  onClick={() => handleTabChange('calendar')}
                   className={`flex-1 py-2 text-[11px] font-sans rounded-xl font-medium whitespace-nowrap transition-all ${
                     activeTab === 'calendar' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500'
                   }`}
@@ -1447,7 +1580,7 @@ export default function App() {
                   Calendar
                 </button>
                 <button
-                  onClick={() => setActiveTab('notes')}
+                  onClick={() => handleTabChange('notes')}
                   className={`flex-1 py-2 text-[11px] font-sans rounded-xl font-medium whitespace-nowrap transition-all ${
                     activeTab === 'notes' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500'
                   }`}
@@ -1487,10 +1620,10 @@ export default function App() {
                             >
                               <Sparkles className={`w-3.5 h-3.5 text-indigo-500 ${loadingAdvice ? 'animate-spin' : ''}`} />
                               {loadingAdvice 
-                                ? (lang === 'hi' ? 'सलाह विचार-मंथन जारी है...' : 'Brainstorming Active Advice...') 
+                                ? (lang === 'hinglish' ? 'Brainstorming chal rahi hai...' : 'Brainstorming Active Advice...') 
                                 : activeAdvice 
-                                  ? (lang === 'hi' ? '🧠 फिर से विचार-मंथन करें' : '🧠 Brainstorm New Action Plan')
-                                  : (lang === 'hi' ? '💡 कस्टम कार्य योजना विचार-मंथन' : '💡 Live Tactical Brainstorm Session')
+                                  ? (lang === 'hinglish' ? '🧠 Naya Action Plan sochein' : '🧠 Brainstorm New Action Plan')
+                                  : (lang === 'hinglish' ? '💡 Live Brainstorm Session' : '💡 Live Tactical Brainstorm Session')
                               }
                             </button>
                             {activeAdvice && (
@@ -1498,7 +1631,7 @@ export default function App() {
                                 onClick={() => setActiveAdvice('')}
                                 className="px-3 py-1.5 text-[11px] text-zinc-500 hover:text-zinc-850 dark:hover:text-zinc-200 font-semibold cursor-pointer"
                               >
-                                {lang === 'hi' ? 'छुपाएं' : 'Reset / Hide'}
+                                {lang === 'hinglish' ? 'Chhupayein' : 'Reset / Hide'}
                               </button>
                             )}
                           </div>
@@ -1506,7 +1639,7 @@ export default function App() {
                       </div>
 
                       <button
-                        onClick={() => setActiveTab('planner')}
+                        onClick={() => handleTabChange('planner')}
                         className={`px-4 py-2 rounded-xl text-xs font-semibold text-white transition-all flex items-center gap-1.5 cursor-pointer self-stretch md:self-auto justify-center ${accentColor}`}
                       >
                         <ShieldAlert className="w-3.5 h-3.5" />
@@ -1608,7 +1741,7 @@ export default function App() {
                             <div className="flex flex-col">
                               <span className="text-xs font-bold text-zinc-850 dark:text-zinc-200">{t('bareMinimumMode')}</span>
                               <span className="text-[10px] text-zinc-400 font-mono mt-0.5">
-                                {lang === 'hi' ? 'केवल अति-महत्वपूर्ण लक्ष्यों को ही दिखाएं।' : 'Filter out low priorities to focus.'}
+                                {lang === 'hinglish' ? 'Sirf critical aur high priority goals ko show karein.' : 'Filter out low priorities to focus.'}
                               </span>
                             </div>
                             <button
@@ -1662,7 +1795,7 @@ export default function App() {
 
                       <div className="space-y-2 border-t border-zinc-100 dark:border-zinc-900/60 pt-4">
                         <button
-                          onClick={() => setActiveTab('focus')}
+                          onClick={() => handleTabChange('focus')}
                           className="w-full py-2.5 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-850 text-xs text-zinc-750 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-800 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer font-sans"
                         >
                           <PlayCircle className="w-4 h-4 text-amber-500" />
@@ -1687,7 +1820,7 @@ export default function App() {
                       </h3>
                     </div>
 
-                    <form onSubmit={handleAddTask} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                    <form onSubmit={handleAddTask} className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 items-end">
                       <div className="md:col-span-2">
                         <label className="block text-[9px] font-mono text-zinc-500 uppercase mb-1">Target Name</label>
                         <input
@@ -1714,6 +1847,34 @@ export default function App() {
                         </select>
                       </div>
 
+                      <div>
+                        <label className="block text-[9px] font-mono text-zinc-500 uppercase mb-1">Category</label>
+                        <select
+                          value={newTaskCategory}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '__new__') {
+                              const newCat = prompt(lang === 'hinglish' ? 'Naya Category naam likhein:' : 'Enter new category name:');
+                              if (newCat && newCat.trim()) {
+                                const trimmed = newCat.trim();
+                                if (!availableCategories.includes(trimmed)) {
+                                  setAvailableCategories(prev => [...prev, trimmed]);
+                                }
+                                setNewTaskCategory(trimmed);
+                              }
+                            } else {
+                              setNewTaskCategory(val);
+                            }
+                          }}
+                          className="w-full px-3 py-2.5 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl focus:outline-none focus:border-indigo-500 text-zinc-800 dark:text-zinc-350"
+                        >
+                          {availableCategories.map(cat => (
+                            <option key={cat} value={cat}>{cat}</option>
+                          ))}
+                          <option value="__new__">+ New Category...</option>
+                        </select>
+                      </div>
+
                       <div className="flex gap-2">
                         <div className="flex-1">
                           <label className="block text-[9px] font-mono text-zinc-500 uppercase mb-1">Due Date</label>
@@ -1722,7 +1883,7 @@ export default function App() {
                             value={newTaskDueDate}
                             onChange={(e) => setNewTaskDueDate(e.target.value)}
                             required
-                            className="w-full px-3 py-1.5 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl focus:outline-none focus:border-indigo-500 text-zinc-800 dark:text-zinc-300 font-mono"
+                            className="w-full px-3 py-1.5 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl focus:outline-none focus:border-indigo-500 text-zinc-800 dark:text-zinc-350 font-mono"
                           />
                         </div>
                         <button
@@ -1757,11 +1918,11 @@ export default function App() {
                                 <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 animate-bounce" style={{ animationDuration: '3s' }} />
                                 <div>
                                   <span className="font-bold">
-                                    {lang === 'hi' ? '⚠️ न्यूनतम कार्य मोड सक्रिय!' : '⚠️ Bare Minimum Mode Active!'}
+                                    {lang === 'hinglish' ? '⚠️ Bare Minimum Mode Active!' : '⚠️ Bare Minimum Mode Active!'}
                                   </span>
                                   <span className="ml-1 text-[11px] text-zinc-500 dark:text-zinc-400">
-                                    {lang === 'hi'
-                                      ? `कम प्राथमिकता वाले ${hiddenCount} कार्य छिपे हुए हैं ताकि आप तनाव से बच सकें। केवल आवश्यक काम करें!`
+                                    {lang === 'hinglish'
+                                      ? `Low priority ke ${hiddenCount} tasks hide ho gaye hain taaki aap relax rahain. Sirf critical work par focus karein!`
                                       : `We filtered out ${hiddenCount} low-priority goals to keep you focused only on critical targets.`}
                                   </span>
                                 </div>
@@ -1770,7 +1931,7 @@ export default function App() {
                                 onClick={() => setBareMinimumMode(false)}
                                 className="px-3 py-1 text-[10px] font-bold bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 rounded-xl transition-all self-end sm:self-auto cursor-pointer"
                               >
-                                {lang === 'hi' ? 'सभी कार्य दिखाएं' : 'Show All Tasks'}
+                                {lang === 'hinglish' ? 'Sare Tasks Show Karein' : 'Show All Tasks'}
                               </button>
                             </div>
                           )}
@@ -1779,7 +1940,7 @@ export default function App() {
                             <div className="text-center py-16 bg-zinc-900/10 border border-dashed border-zinc-900 rounded-3xl text-zinc-500">
                               <CheckCircle2 className="w-10 h-10 mx-auto mb-2 text-emerald-500/40" />
                               <p className="text-xs font-sans">
-                                {lang === 'hi' ? 'कोई लंबित कार्य नहीं मिला। बेहतरीन काम!' : 'No threat targets listed. Excellent work!'}
+                                {lang === 'hinglish' ? 'Sare tasks poore ho gaye hain. Boht badiya!' : 'No threat targets listed. Excellent work!'}
                               </p>
                             </div>
                           ) : (
@@ -1830,19 +1991,75 @@ export default function App() {
                                             </h4>
                                             
                                             <div className="flex flex-wrap items-center gap-2">
-                                              <span className="text-[10px] font-mono bg-zinc-100 dark:bg-zinc-950 px-2 py-0.5 rounded text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-900">
+                                              <span 
+                                                onClick={() => {
+                                                  setActiveColorEditingCategory(task.category);
+                                                }}
+                                                style={{ 
+                                                  backgroundColor: `${categoryColors[task.category] || '#71717a'}1c`, 
+                                                  color: categoryColors[task.category] || '#71717a',
+                                                  borderColor: `${categoryColors[task.category] || '#71717a'}3a`
+                                                }}
+                                                className="text-[10px] font-mono px-2 py-0.5 rounded border cursor-pointer hover:scale-105 active:scale-95 transition-all flex items-center gap-1.5"
+                                                title="Click to customize category color"
+                                              >
+                                                <span 
+                                                  className="w-1.5 h-1.5 rounded-full shrink-0" 
+                                                  style={{ backgroundColor: categoryColors[task.category] || '#71717a' }} 
+                                                />
                                                 {task.category}
                                               </span>
+
                                               <span className="text-[10px] font-mono text-zinc-500 flex items-center gap-1">
                                                 <Clock className="w-3 h-3 text-zinc-400 dark:text-zinc-600" />
                                                 {getDaysRemainingText(task.dueDate)}
                                               </span>
                                             </div>
+
+                                            {/* 5-Minute Micro-Start dynamic helper layout */}
+                                            {microStarts[task.id] && (
+                                              <div className="mt-2.5 p-3 rounded-2xl bg-gradient-to-r from-amber-500/10 to-orange-500/5 dark:from-amber-500/5 dark:to-orange-500/0 border border-amber-500/20 text-xs text-zinc-800 dark:text-zinc-300 animate-in fade-in slide-in-from-top-1 max-w-md">
+                                                {microStarts[task.id].loading ? (
+                                                  <div className="flex items-center gap-2 py-1 text-[11px] font-mono text-amber-600 dark:text-amber-400">
+                                                    <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                                                    AI is mapping the lowest-friction start step...
+                                                  </div>
+                                                ) : (
+                                                  <div className="space-y-1">
+                                                    <div className="flex items-start gap-1.5">
+                                                      <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+                                                      <div>
+                                                        <p className="font-sans font-bold text-zinc-900 dark:text-zinc-100 text-[11px]">
+                                                          5-Minute Micro-Start:
+                                                        </p>
+                                                        <p className="font-sans text-zinc-700 dark:text-zinc-300 text-[11px] mt-0.5 leading-normal">
+                                                          {microStarts[task.id].action}
+                                                        </p>
+                                                      </div>
+                                                    </div>
+                                                    {microStarts[task.id].encouragement && (
+                                                      <p className="text-[10px] text-zinc-500 italic pl-5">
+                                                        "{microStarts[task.id].encouragement}"
+                                                      </p>
+                                                    )}
+                                                  </div>
+                                                )}
+                                              </div>
+                                            )}
                                           </div>
                                         </div>
 
                                         {/* Task Action items */}
                                         <div className="flex flex-wrap gap-2 self-start md:self-auto pl-8 md:pl-0">
+                                          <button
+                                            onClick={() => handleMicroStart(task)}
+                                            className="px-2.5 py-1.5 bg-gradient-to-r from-amber-500/10 to-orange-500/10 hover:from-amber-500/20 hover:to-orange-500/20 border border-amber-500/20 rounded-xl text-[10px] text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-all flex items-center gap-1 cursor-pointer"
+                                            title="Generate a 5-minute low-friction micro-action to start this task"
+                                          >
+                                            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                                            Help me start
+                                          </button>
+
                                           <button
                                             onClick={() => handleLaunchFocusForTask(task)}
                                             className="px-2.5 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl text-[10px] text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white transition-all flex items-center gap-1 cursor-pointer"
@@ -1994,6 +2211,7 @@ export default function App() {
                       onSessionComplete={handleFocusSessionComplete}
                       accentColor={accentColor}
                       borderColor={borderColor}
+                      onNuclearLockStateChange={setIsNuclearLocked}
                     />
                   </div>
 
@@ -2070,7 +2288,7 @@ export default function App() {
               calendarSynced: false
             };
             setTasks(prev => [newTask, ...prev]);
-            setActiveTab('planner');
+            handleTabChange('planner');
             alert(`Saved target "${title}" to your planner targets!`);
           }}
           accentColor={accentColor}
@@ -2176,13 +2394,13 @@ export default function App() {
           <div className="max-w-xl w-full text-center space-y-8 z-10">
             <div className="space-y-2">
               <span className="text-[10px] font-mono tracking-widest text-emerald-400 font-extrabold uppercase">
-                {lang === 'hi' ? '• सक्रिय ध्यानपूर्ण विश्राम •' : '• Active Mindful Rest Protocol •'}
+                {lang === 'hinglish' ? '• Active Mindful Rest Protocol •' : '• Active Mindful Rest Protocol •'}
               </span>
               <h2 className="font-display font-black text-3xl md:text-4xl text-white tracking-tight">
-                {lang === 'hi' ? 'सकारात्मक शीतलन दिवस' : 'Zen Cooldown Day'}
+                {lang === 'hinglish' ? 'Zen Cooldown Day' : 'Zen Cooldown Day'}
               </h2>
               <p className="text-sm text-zinc-400 leading-relaxed max-w-md mx-auto">
-                {lang === 'hi' ? 'आपकी उत्पादकता आपके मानसिक स्वास्थ्य पर निर्भर करती है। आज सांस लें, आराम करें और अपने लक्ष्यों को थाम लें।' : 'Your energy is a finite resource. Today, let go of the pressure to complete, and cultivate mindful space.'}
+                {lang === 'hinglish' ? 'Aapki energy limited hai. Aaj stress free rahiye, breathe karein aur goals ko thoda rest dejiye.' : 'Your energy is a finite resource. Today, let go of the pressure to complete, and cultivate mindful space.'}
               </p>
             </div>
 
@@ -2191,7 +2409,7 @@ export default function App() {
               <div className="w-40 h-40 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center relative animate-pulse" style={{ animationDuration: '6s' }}>
                 <div className="w-28 h-28 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center animate-ping" style={{ animationDuration: '6s' }} />
                 <div className="absolute text-center text-[10px] font-mono text-emerald-400 uppercase font-bold tracking-wider">
-                  {lang === 'hi' ? 'सांस लें... और छोड़ें...' : 'Breathe In... Out...'}
+                  {lang === 'hinglish' ? 'Saans lein... aur chhodein...' : 'Breathe In... Out...'}
                 </div>
               </div>
             </div>
@@ -2201,8 +2419,8 @@ export default function App() {
               <Moon className="w-5 h-5 mx-auto text-emerald-400 animate-bounce" style={{ animationDuration: '4s' }} />
               <p className="text-xs text-zinc-300 font-sans italic leading-relaxed">
                 {currentPersonality.id === 'philosopher'
-                  ? (lang === 'hi' ? '“समय एक नदी है जो वर्तमान में बहती है। किनारे पर बैठकर पानी का आनंद लें, तैरने की जल्दी न करें।”' : '“Do not speed up to catch the horizon. The horizon is already within you. Resting is as noble as striving.”')
-                  : (lang === 'hi' ? '“आज कोई कार्य सूची नहीं है। केवल अपनी शांत चेतना है। अपने काम को रुकने दें ताकि आत्मा बढ़ सके।”' : '“Today, there are no tasks. Only pure, tranquil awareness. Let your checklist sleep so your spirit can wake.”')
+                  ? (lang === 'hinglish' ? '“Waqt ek behne wali nadi hai jo sirf abhi (present) me behti hai. Kinare par baithkar paani ka maza lein, tairne ki jaldi mat karein.”' : '“Do not speed up to catch the horizon. The horizon is already within you. Resting is as noble as striving.”')
+                  : (lang === 'hinglish' ? '“Aaj koi to-do list nahi hai. Sirf apni shaant consciousness hai. Checklist ko sone dein taaki soul wake up ho sake.”' : '“Today, there are no tasks. Only pure, tranquil awareness. Let your checklist sleep so your spirit can wake.”')
                 }
               </p>
               <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono block">
@@ -2213,7 +2431,7 @@ export default function App() {
             {/* Ambient Controls */}
             <div className="space-y-2">
               <span className="text-[9px] uppercase font-mono tracking-widest text-zinc-500 block">
-                {lang === 'hi' ? 'दबाएं और सुनिए:' : 'Soothing Ambience Generator:'}
+                {lang === 'hinglish' ? 'Sunein aur relax karein:' : 'Soothing Ambience Generator:'}
               </span>
               <div className="flex justify-center gap-3">
                 <button
@@ -2224,11 +2442,11 @@ export default function App() {
                   Zen Drone
                 </button>
                 <button
-                  onClick={() => synthManager.playOcean()}
+                  onClick={() => synthManager.playLofi2()}
                   className="px-3.5 py-2 bg-zinc-900 hover:bg-zinc-850 text-[10px] font-semibold rounded-xl border border-zinc-800 text-zinc-300 transition-all flex items-center gap-1.5 cursor-pointer"
                 >
-                  <Compass className="w-3.5 h-3.5 text-sky-400" />
-                  Ocean Waves
+                  <Music className="w-3.5 h-3.5 text-sky-400" />
+                  Lofi Beats 2
                 </button>
                 <button
                   onClick={() => synthManager.stop()}
@@ -2245,7 +2463,7 @@ export default function App() {
                 className="px-6 py-3 bg-white text-zinc-950 hover:bg-zinc-200 text-xs font-bold rounded-2xl transition-all cursor-pointer shadow-lg inline-flex items-center gap-2"
               >
                 <Sun className="w-4 h-4 text-amber-500" />
-                {lang === 'hi' ? 'जागृत कार्यक्षेत्र पर लौटें' : 'Resume Active Workspace'}
+                {lang === 'hinglish' ? 'Workspace par wapas chalein' : 'Resume Active Workspace'}
               </button>
             </div>
           </div>
@@ -2267,11 +2485,112 @@ export default function App() {
               }}
               className="px-2.5 py-1 text-[10px] font-mono font-extrabold uppercase bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/15 rounded-lg hover:bg-indigo-500/25 transition-all cursor-pointer shrink-0"
             >
-              {lang === 'hi' ? 'पूर्ववत (Undo)' : 'Undo'}
+              {lang === 'hinglish' ? 'Wapas lein (Undo)' : 'Undo'}
             </button>
           )}
         </div>
       )}
+
+      {/* Category Custom Color Customizer Modal */}
+      {activeColorEditingCategory && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div 
+            className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-[2rem] max-w-sm w-full p-6 shadow-2xl relative animate-in zoom-in-95 duration-200"
+          >
+            <button 
+              onClick={() => setActiveColorEditingCategory(null)}
+              className="absolute top-4 right-4 p-1 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-600 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className="font-display font-bold text-base text-zinc-900 dark:text-white mb-2">
+              {lang === 'hinglish' ? 'Category Color Customize Karein' : 'Customize Category Color'}
+            </h3>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-4">
+              {lang === 'hinglish' 
+                ? `Category "${activeColorEditingCategory}" ke liye apna manpasand color choose karein.` 
+                : `Set a custom color for the category "${activeColorEditingCategory}" to keep things organized.`}
+            </p>
+
+            {/* Presets Grid */}
+            <div className="grid grid-cols-6 gap-2 mb-4">
+              {[
+                '#3b82f6', // Blue
+                '#ef4444', // Red
+                '#ec4899', // Pink
+                '#10b981', // Green
+                '#8b5cf6', // Purple
+                '#f97316', // Orange
+                '#14b8a6', // Teal
+                '#f59e0b', // Amber
+                '#06b6d4', // Cyan
+                '#84cc16', // Lime
+                '#6366f1', // Indigo
+                '#a855f7', // Purple-bright
+              ].map((color) => (
+                <button
+                  key={color}
+                  onClick={() => {
+                    setCategoryColors(prev => ({
+                      ...prev,
+                      [activeColorEditingCategory]: color
+                    }));
+                  }}
+                  className="w-full h-8 rounded-xl border border-white/20 relative shadow-sm cursor-pointer transition-transform hover:scale-110 active:scale-95"
+                  style={{ backgroundColor: color }}
+                >
+                  {categoryColors[activeColorEditingCategory] === color && (
+                    <span className="absolute inset-0 flex items-center justify-center text-white font-bold text-xs">✓</span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Custom Input */}
+            <div className="space-y-2 mb-6">
+              <label className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 dark:text-zinc-500 block">
+                Custom HEX Code:
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={categoryColors[activeColorEditingCategory] || '#71717a'}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setCategoryColors(prev => ({
+                      ...prev,
+                      [activeColorEditingCategory]: val
+                    }));
+                  }}
+                  className="flex-1 px-3 py-2 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:border-indigo-500 text-zinc-800 dark:text-zinc-100 font-mono"
+                  placeholder="#FFFFFF"
+                />
+                <input
+                  type="color"
+                  value={categoryColors[activeColorEditingCategory] || '#71717a'}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setCategoryColors(prev => ({
+                      ...prev,
+                      [activeColorEditingCategory]: val
+                    }));
+                  }}
+                  className="w-10 h-8 rounded-xl bg-transparent border-0 cursor-pointer overflow-hidden shrink-0"
+                />
+              </div>
+            </div>
+
+            <button
+              onClick={() => setActiveColorEditingCategory(null)}
+              className="w-full py-2.5 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-bold rounded-xl shadow hover:opacity-90 transition-opacity cursor-pointer"
+            >
+              {lang === 'hinglish' ? 'Ho Gaya' : 'Done'}
+            </button>
+          </div>
+        </div>
+      )}
+
 
     </div>
   );

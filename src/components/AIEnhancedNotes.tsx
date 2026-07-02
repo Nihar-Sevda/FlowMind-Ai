@@ -19,7 +19,7 @@ import { QuickNote, Task, AIPersonality } from '../types';
 import { TranslationSet } from '../data/translations';
 
 interface AIEnhancedNotesProps {
-  lang: 'en' | 'hi';
+  lang: 'en' | 'hinglish';
   t: (key: keyof TranslationSet) => string;
   onAddMultipleTasks: (newTasks: Omit<Task, 'id' | 'completed' | 'calendarSynced'>[]) => void;
   currentPersonality: AIPersonality;
@@ -37,13 +37,14 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
       }
     }
     // High-fidelity fallback notes
+    const isHinglish = lang === 'hinglish';
     return [
       {
         id: 'n1',
-        title: lang === 'hi' ? '🌟FlowMind मुख्य उद्देश्य' : '🌟 FlowMind Main Strategy',
+        title: isHinglish ? '🌟 FlowMind Ka Main Plan' : '🌟 FlowMind Main Strategy',
         topic: 'Productivity',
-        content: lang === 'hi' 
-          ? '### रफ विचार\n- हमें हर कार्य को टालने से बचाना है।\n- ट्रीज विकल्प काफी उपयोगी है।\n- समय सारिणी बेहतर बनाएं।'
+        content: isHinglish 
+          ? '### Raw Thoughts\n- Hame har kaam ko delay (procrastinate) karne se bachna hai.\n- Pomodoro sessions active focus maintain karne me help karte hain.\n- AI companion tension aur pressure kam karne ke liye tips dega.'
           : '### Raw Strategy Draft\n- Prioritize critical rescue tasks before others.\n- Run Pomodoro sessions to maintain absolute traction.\n- AI companion helps push back against stress spikes.',
         createdAt: new Date().toLocaleDateString()
       }
@@ -89,14 +90,14 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
       // @ts-ignore
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SpeechRecognition) {
-        alert(lang === 'hi' ? "आपका ब्राउज़र वॉयस रिकग्निशन का समर्थन नहीं करता है। कृपया क्रोम या सफारी का उपयोग करें।" : "Your browser doesn't support live speech recognition. Feel free to type/paste your thoughts!");
+        alert(lang === 'hinglish' ? "Aapka browser voice recognition support nahi karta. Please Chrome ya Safari use karein." : "Your browser doesn't support live speech recognition. Feel free to type/paste your thoughts!");
         return;
       }
 
       const rec = new SpeechRecognition();
       rec.continuous = true;
       rec.interimResults = true;
-      rec.lang = lang === 'hi' ? 'hi-IN' : 'en-US';
+      rec.lang = lang === 'hinglish' ? 'hi-IN' : 'en-US';
 
       rec.onresult = (event: any) => {
         let finalTranscript = '';
@@ -158,19 +159,19 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
       if (data && data.tasks && data.tasks.length > 0) {
         onAddMultipleTasks(data.tasks);
         setExtractedFeedback(
-          lang === 'hi' 
-            ? `${data.tasks.length} नए कार्य सफलतापूर्व आपके प्लानर में जोड़े गए हैं!`
+          lang === 'hinglish' 
+            ? `${data.tasks.length} naye tasks successfully aapke planner me add ho gaye hain!`
             : `Added ${data.tasks.length} actionable tasks to your planner!`
         );
         setVoiceDumpText('');
         // Auto-clear feedback after 5 seconds
         setTimeout(() => setExtractedFeedback(''), 5000);
       } else {
-        alert(lang === 'hi' ? "कोई कार्य नहीं मिला। कृपया अधिक स्पष्टता से बोलें।" : "Could not extract any tasks. Try being a bit more specific!");
+        alert(lang === 'hinglish' ? "Koi tasks nahi mile. Thoda detail ya clear words me likhein." : "Could not extract any tasks. Try being a bit more specific!");
       }
     } catch (err: any) {
       console.error(err);
-      alert(lang === 'hi' ? "एआई विश्लेषण करने में विफल।" : "Failed to structure thoughts with Gemini. Please try again.");
+      alert(lang === 'hinglish' ? "AI analysis fail ho gaya. Please manually try karein." : "Failed to structure thoughts with Gemini. Please try again.");
     } finally {
       setIsProcessingVoice(false);
     }
@@ -185,10 +186,11 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
     e.preventDefault();
     if (!newContent.trim()) return;
 
+    const isHinglish = lang === 'hinglish';
     const note: QuickNote = {
       id: 'note_' + Date.now(),
-      title: newTitle.trim() || (lang === 'hi' ? 'शीर्षकहीन नोट' : 'Untitled Note'),
-      topic: newTopic.trim() || (lang === 'hi' ? 'सामान्य' : 'General'),
+      title: newTitle.trim() || (isHinglish ? 'Untitled Note' : 'Untitled Note'),
+      topic: newTopic.trim() || (isHinglish ? 'General' : 'General'),
       content: newContent,
       createdAt: new Date().toLocaleString()
     };
@@ -294,7 +296,7 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
     onAddMultipleTasks(formatted);
     setSplitResults([]);
     setSplitGoal('');
-    setSuccessMsg(lang === 'hi' ? 'सभी उप-कार्य सफलतापूर्वक आपके डेडलॉइन नियोजक में जोड़ दिए गए हैं!' : 'All sub-tasks successfully imported to your Deadline Planner!');
+    setSuccessMsg(lang === 'hinglish' ? 'Sare sub-tasks successfully Deadline Planner me add ho gaye hain!' : 'All sub-tasks successfully imported to your Deadline Planner!');
   };
 
   // Simple formatter to parse raw lines, bold, and list elements in a beautiful styling
@@ -375,7 +377,7 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
             }`}
           >
             <FileText className="w-3.5 h-3.5" />
-            {lang === 'hi' ? 'स्क्रैचपैड' : 'Scratchpad'}
+            {lang === 'hinglish' ? 'Scratchpad' : 'Scratchpad'}
           </button>
           <button
             onClick={() => setActiveSubTab('splitter')}
@@ -400,7 +402,7 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
             {/* Note Input Form */}
             <div className="p-5 rounded-3xl border border-zinc-200/80 dark:border-zinc-900 bg-white dark:bg-zinc-900/30 shadow-sm space-y-4">
               <h3 className="font-display font-extrabold text-xs text-zinc-900 dark:text-zinc-150 uppercase tracking-wider font-mono">
-                {lang === 'hi' ? '✍️ नया नोट दर्ज करें' : '✍️ Create New Note'}
+                {lang === 'hinglish' ? '✍️ Naya Note Likhein' : '✍️ Create New Note'}
               </h3>
 
               <form onSubmit={handleSaveNote} className="space-y-3">
@@ -450,13 +452,13 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
               <div className="flex items-center gap-2">
                 <Mic className="w-4 h-4 text-indigo-500 animate-pulse" />
                 <h3 className="font-display font-extrabold text-xs text-zinc-900 dark:text-zinc-150 uppercase tracking-wider font-mono">
-                  {lang === 'hi' ? '🎙️ वॉयस डंप (ऑडियो-टू-एक्शन)' : '🎙️ Frictionless Voice Dump'}
+                  {lang === 'hinglish' ? '🎙️ Frictionless Voice Dump' : '🎙️ Frictionless Voice Dump'}
                 </h3>
               </div>
               
               <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-sans leading-relaxed">
-                {lang === 'hi' 
-                  ? 'अपने अव्यवस्थित विचारों को बोलें या टाइप करें। एआई तुरंत महत्वपूर्ण कार्यों को निकालेगा और उन्हें योजनाकार में जोड़ देगा।' 
+                {lang === 'hinglish' 
+                  ? 'Apne unstructured thoughts ko boleya type karein. AI instantly important tasks nikal kar planner me add kar dega.' 
                   : 'Speak or type your messy, unstructured thoughts. AI will instantly extract tasks, deadlines, and urgencies.'
                 }
               </p>
@@ -469,8 +471,8 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
                     value={voiceDumpText}
                     onChange={(e) => setVoiceDumpText(e.target.value)}
                     placeholder={isRecording 
-                      ? (lang === 'hi' ? 'सुन रहा हूँ... बोलें...' : 'Listening... Speak your thoughts...') 
-                      : (lang === 'hi' ? 'जैसे: "मुझे शुक्रवार तक प्रोजेक्ट डिप्लॉय करना है, और कल सुबह सारा को ईमेल भेजना है..."' : 'e.g., "I need to finish the deployment by Friday, oh and I also need to email Sarah about the database schema tomorrow morning"')
+                      ? (lang === 'hinglish' ? 'Suno... bolte raho...' : 'Listening... Speak your thoughts...') 
+                      : (lang === 'hinglish' ? 'e.g., "Mujhe Friday tak project deploy karna hai, aur kal subah meeting attend karni hai..."' : 'e.g., "I need to finish the deployment by Friday, oh and I also need to email Sarah about the database schema tomorrow morning"')
                     }
                     className={`w-full p-3 text-xs bg-zinc-50 dark:bg-zinc-950 border rounded-xl focus:outline-none transition-all resize-none text-zinc-800 dark:text-white ${
                       isRecording 
@@ -500,12 +502,12 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
                     {isRecording ? (
                       <>
                         <MicOff className="w-3 h-3 animate-bounce" />
-                        {lang === 'hi' ? 'रिकॉर्डिंग रोकें' : 'Stop Recording'}
+                        {lang === 'hinglish' ? 'Recording Stop Karein' : 'Stop Recording'}
                       </>
                     ) : (
                       <>
                         <Mic className="w-3 h-3 text-indigo-500" />
-                        {lang === 'hi' ? 'बोलना शुरू करें' : 'Record Audio'}
+                        {lang === 'hinglish' ? 'Bolna Start Karein' : 'Record Audio'}
                       </>
                     )}
                   </button>
@@ -519,12 +521,12 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
                     {isProcessingVoice ? (
                       <>
                         <Loader2 className="w-3 h-3 animate-spin" />
-                        {lang === 'hi' ? 'प्रोसेसिंग...' : 'Structuring...'}
+                        {lang === 'hinglish' ? 'Processing...' : 'Structuring...'}
                       </>
                     ) : (
                       <>
                         <Sparkles className="w-3 h-3 text-amber-500" />
-                        {lang === 'hi' ? 'विश्लेषण' : 'Extract'}
+                        {lang === 'hinglish' ? 'Extract' : 'Extract'}
                       </>
                     )}
                   </button>
@@ -532,7 +534,7 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
 
                 {extractedFeedback && (
                   <div className="p-3 bg-emerald-50/40 dark:bg-emerald-950/10 border border-emerald-500/20 rounded-xl text-[10px] text-emerald-600 dark:text-emerald-400 font-sans leading-relaxed animate-in fade-in duration-250">
-                    🎉 <strong>{lang === 'hi' ? 'सफलता:' : 'Extracted:'}</strong> {extractedFeedback}
+                    🎉 <strong>{lang === 'hinglish' ? 'Extracted:' : 'Extracted:'}</strong> {extractedFeedback}
                   </div>
                 )}
               </div>
@@ -643,7 +645,7 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
               {splitting ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  {lang === 'hi' ? 'विभाजित कर रहा है...' : 'Splitting...'}
+                  {lang === 'hinglish' ? 'Split ho raha hai...' : 'Splitting...'}
                 </>
               ) : (
                 <>
@@ -664,7 +666,7 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
           {splitResults.length > 0 && (
             <div className="space-y-4 max-w-xl mx-auto border-t border-zinc-100 dark:border-zinc-900/60 pt-6 animate-in fade-in duration-300">
               <h4 className="text-[11px] font-mono font-extrabold text-zinc-400 uppercase tracking-widest text-center">
-                {lang === 'hi' ? '💡 प्रस्तावित उप-कार्य अनुक्रम' : '💡 Proposed Sub-Task Sequence'}
+                {lang === 'hinglish' ? '💡 Proposed Sub-Task Sequence' : '💡 Proposed Sub-Task Sequence'}
               </h4>
 
               <div className="space-y-2.5">
@@ -684,7 +686,7 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
                         <div className="flex items-center gap-2 mt-1">
                           <span className="text-[9px] font-mono text-zinc-400 uppercase tracking-wider">{sub.category}</span>
                           <span className="w-1 h-1 rounded-full bg-zinc-300 dark:bg-zinc-800" />
-                          <span className="text-[9px] font-mono text-zinc-400">{sub.duration} {lang === 'hi' ? 'मिनट' : 'mins'}</span>
+                          <span className="text-[9px] font-mono text-zinc-400">{sub.duration} {lang === 'hinglish' ? 'min' : 'mins'}</span>
                         </div>
                       </div>
                     </div>
@@ -707,7 +709,7 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
                   className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-sm"
                 >
                   <PlusCircle className="w-4 h-4" />
-                  {lang === 'hi' ? 'सभी को नियोजक में जोड़ें' : 'Import All Sub-Tasks to Planner'}
+                  {lang === 'hinglish' ? 'Planner me Import Karein' : 'Import All Sub-Tasks to Planner'}
                 </button>
               </div>
             </div>

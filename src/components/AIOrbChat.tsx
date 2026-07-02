@@ -32,12 +32,14 @@ export default function AIOrbChat({
   const [showPersonalityDropdown, setShowPersonalityDropdown] = useState<boolean>(false);
   const [voiceEnabled, setVoiceEnabled] = useState<boolean>(false);
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
+  const [isAudioLoading, setIsAudioLoading] = useState<boolean>(false);
 
   // Animated visualizer frequencies state
   const [visualizerHeights, setVisualizerHeights] = useState<number[]>(currentPersonality.voiceFrequencies || [4, 10, 6, 12, 5, 8, 4]);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const speechUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Scroll to bottom on new message
   const scrollToBottom = () => {
@@ -72,11 +74,21 @@ export default function AIOrbChat({
         animId = setTimeout(updateFrequencies, 100);
       };
       updateFrequencies();
+    } else if (isAudioLoading) {
+      const updateFrequencies = () => {
+        // Slow gentle sinusoidal pulse during loading
+        setVisualizerHeights(prev => prev.map((_, idx) => {
+          const time = Date.now() / 150;
+          return Math.floor(Math.sin(time + idx * 0.8) * 4) + 6;
+        }));
+        animId = setTimeout(updateFrequencies, 80);
+      };
+      updateFrequencies();
     } else {
       setVisualizerHeights(currentPersonality.voiceFrequencies || [4, 10, 6, 12, 5, 8, 4]);
     }
     return () => clearTimeout(animId);
-  }, [isSpeaking, currentPersonality]);
+  }, [isSpeaking, isAudioLoading, currentPersonality]);
 
   // Pre-load voices for TTS
   useEffect(() => {
@@ -88,60 +100,158 @@ export default function AIOrbChat({
     }
   }, []);
 
-  // Handle TTS speaking
-  const speakText = (text: string) => {
-    if (!voiceEnabled) return;
-    
-    // Cancel any current speech
+  // Fallback to local browser speechSynthesis if premium TTS fails
+  const fallbackSpeakText = (cleanText: string) => {
+    setIsAudioLoading(false);
     if (window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
 
-    // Clean markdown before speaking
-    const cleanText = text.replace(/[*#_`~]/g, '').trim();
-    if (!cleanText) return;
-
     const utterance = new SpeechSynthesisUtterance(cleanText);
+    const voices = window.speechSynthesis.getVoices();
     
-    // Choose voice matching current companion personality
-    if (window.speechSynthesis) {
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length > 0) {
+    const premiumVoices = voices.filter(v => 
+      v.name.includes('Natural') || 
+      v.name.includes('Neural') || 
+      v.name.includes('Premium') || 
+      v.name.includes('Google') || 
+      v.name.includes('Apple') ||
+      v.name.includes('Microsoft') ||
+      v.name.includes('Samantha') ||
+      v.name.includes('Daniel')
+    );
+    
+    const searchVoices = premiumVoices.length > 0 ? premiumVoices : voices;
+
+    if (voices.length > 0) {
+      let matchedVoice = null;
+      const isHinglish = cleanText.match(/[aeiou]a[aeiou]|[bh][aeiou]y|k[ao]|h[ae]i|k[ar]e|y[ae]h|b[ao]l|t[ae]ns[io]n|kaam/i);
+      
+      if (isHinglish) {
+        matchedVoice = searchVoices.find(v => v.lang.includes('IN') || v.name.includes('India') || v.name.includes('Ravi') || v.name.includes('Heera'));
+      }
+
+      if (!matchedVoice) {
         if (currentPersonality.id === 'coach') {
-          // Energetic masculine/intense voice
-          const matchedVoice = voices.find(v => v.name.includes('Male') || v.name.includes('David') || v.name.includes('Google US English'));
-          if (matchedVoice) utterance.voice = matchedVoice;
-          utterance.rate = 1.1;
-          utterance.pitch = 0.95;
+          matchedVoice = searchVoices.find(v => v.name.includes('Male') || v.name.includes('David') || v.name.includes('Google US English') || v.name.includes('Microsoft'));
+          utterance.rate = 1.05;
+          utterance.pitch = 1.0;
         } else if (currentPersonality.id === 'mentor') {
-          // Empathic, soothing voice
-          const matchedVoice = voices.find(v => v.name.includes('Zira') || v.name.includes('Hazel') || v.name.includes('Google UK English Female'));
-          if (matchedVoice) utterance.voice = matchedVoice;
-          utterance.rate = 0.95;
-          utterance.pitch = 1.05;
+          matchedVoice = searchVoices.find(v => v.name.includes('Hazel') || v.name.includes('Zira') || v.name.includes('Google UK English Female') || v.name.includes('Female'));
+          utterance.rate = 0.9;
+          utterance.pitch = 1.02;
         } else if (currentPersonality.id === 'philosopher') {
-          // Slower deep voice
-          const matchedVoice = voices.find(v => v.name.includes('David') || v.name.includes('Premium') || v.name.includes('English India'));
-          if (matchedVoice) utterance.voice = matchedVoice;
-          utterance.rate = 0.85;
-          utterance.pitch = 0.85;
+          matchedVoice = searchVoices.find(v => v.name.includes('David') || v.name.includes('Premium') || v.lang.includes('IN') || v.name.includes('Ravi'));
+          utterance.rate = 0.82;
+          utterance.pitch = 0.88;
+        } else if (currentPersonality.id === 'creative') {
+          matchedVoice = searchVoices.find(v => v.name.includes('Google US English') || v.name.includes('Samantha') || v.name.includes('Female') || v.name.includes('Zira'));
+          utterance.rate = 1.05;
+          utterance.pitch = 1.05; // Lively, energetic tone
         } else {
-          utterance.rate = 1.0;
+          matchedVoice = searchVoices.find(v => v.name.includes('Google') || v.name.includes('Natural'));
+          utterance.rate = 0.95;
+          utterance.pitch = 1.0;
         }
+      }
+
+      if (matchedVoice) {
+        utterance.voice = matchedVoice;
       }
     }
 
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
+    utterance.onstart = () => {
+      setIsAudioLoading(false);
+      setIsSpeaking(true);
+    };
+    utterance.onend = () => {
+      setIsSpeaking(false);
+    };
+    utterance.onerror = () => {
+      setIsSpeaking(false);
+      setIsAudioLoading(false);
+    };
 
     speechUtteranceRef.current = utterance;
     window.speechSynthesis.speak(utterance);
   };
 
+  // Handle TTS speaking using the hyper-realistic Gemini TTS model with fallback
+  const speakText = async (text: string) => {
+    if (!voiceEnabled) return;
+    
+    stopSpeaking();
+
+    // Clean markdown before speaking
+    const cleanText = text.replace(/[*#_`~]/g, '').trim();
+    if (!cleanText) return;
+
+    try {
+      // Indicate that speech is loading/starting
+      setIsAudioLoading(true);
+
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: cleanText,
+          personalityId: currentPersonality.id
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('TTS server error');
+      }
+
+      const data = await response.json();
+      if (data.audioData) {
+        // Base64 audio playback
+        const audioUrl = `data:${data.mimeType || 'audio/wav'};base64,${data.audioData}`;
+        const audio = new Audio(audioUrl);
+        audioRef.current = audio;
+        
+        audio.onplay = () => {
+          setIsAudioLoading(false);
+          setIsSpeaking(true);
+        };
+        audio.onended = () => {
+          setIsSpeaking(false);
+          setIsAudioLoading(false);
+          audioRef.current = null;
+        };
+        audio.onerror = () => {
+          console.warn("Audio playback error, falling back...");
+          setIsAudioLoading(false);
+          fallbackSpeakText(cleanText);
+        };
+
+        await audio.play().catch(playErr => {
+          console.warn("Autoplay was blocked or playback failed, playing with speech fallback:", playErr);
+          setIsAudioLoading(false);
+          fallbackSpeakText(cleanText);
+        });
+      } else {
+        throw new Error('No audio data received');
+      }
+    } catch (err) {
+      console.warn("Gemini Premium TTS failed, falling back to browser synthesis:", err);
+      setIsAudioLoading(false);
+      fallbackSpeakText(cleanText);
+    }
+  };
+
   const stopSpeaking = () => {
+    setIsAudioLoading(false);
     if (window.speechSynthesis) {
       window.speechSynthesis.cancel();
+    }
+    if (audioRef.current) {
+      try {
+        audioRef.current.pause();
+      } catch {}
+      audioRef.current = null;
     }
     setIsSpeaking(false);
   };
@@ -339,7 +449,7 @@ export default function AIOrbChat({
       {isOpen && (
         <div
           id="ai-chat-overlay"
-          className="fixed bottom-24 right-6 w-[400px] max-w-[calc(100vw-2rem)] h-[580px] max-h-[calc(100vh-10rem)] bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-900 flex flex-col overflow-hidden transition-all duration-350 z-50 animate-in fade-in slide-in-from-bottom-6"
+          className="fixed bottom-24 right-6 w-[560px] max-w-[calc(100vw-2rem)] h-[740px] max-h-[calc(100vh-10rem)] bg-white/98 dark:bg-zinc-950/98 backdrop-blur-lg rounded-[2.2rem] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.35)] dark:shadow-[0_25px_60px_-15px_rgba(0,0,0,0.7)] border border-zinc-200/80 dark:border-zinc-900 flex flex-col overflow-hidden transition-all duration-350 z-50 animate-in fade-in slide-in-from-bottom-6"
         >
           {/* Custom Header with Personality Styling */}
           <div className={`p-4 bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-white relative border-b border-zinc-200/60 dark:border-zinc-850/60`}>
@@ -469,11 +579,17 @@ export default function AIOrbChat({
           </div>
 
           {/* Voice Speech/Visualizer Waveform Overlay if Speaking */}
-          {(isSpeaking || voiceEnabled) && (
+          {(isSpeaking || voiceEnabled || isAudioLoading) && (
             <div className="px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900 border-t border-zinc-200/60 dark:border-zinc-850 flex items-center justify-between gap-4">
               <span className="text-[10px] font-mono text-zinc-500 flex items-center gap-1">
-                <CircleDot className="w-3 h-3 text-rose-500 animate-pulse" />
-                Companion Output Wave
+                <CircleDot className={`w-3 h-3 ${isSpeaking ? 'text-rose-500 animate-pulse' : isAudioLoading ? 'text-amber-500 animate-bounce' : 'text-zinc-400'}`} />
+                {isAudioLoading ? (
+                  <span className="text-amber-600 dark:text-amber-400 font-sans font-medium animate-pulse">
+                    Preparing expressive voice...
+                  </span>
+                ) : (
+                  <span>Companion Output Wave</span>
+                )}
               </span>
               
               {/* Dynamic Animated Bars */}
@@ -481,13 +597,13 @@ export default function AIOrbChat({
                 {visualizerHeights.map((h, i) => (
                   <div
                     key={i}
-                    className="w-1 bg-gradient-to-t from-indigo-500 to-fuchsia-400 rounded-full transition-all duration-100"
+                    className={`w-1 ${isAudioLoading ? 'bg-amber-400' : 'bg-gradient-to-t from-indigo-500 to-fuchsia-400'} rounded-full transition-all duration-100`}
                     style={{ height: `${h}px` }}
                   />
                 ))}
               </div>
 
-              {isSpeaking ? (
+              {isSpeaking || isAudioLoading ? (
                 <button
                   onClick={stopSpeaking}
                   className="p-1 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 rounded text-[9px] font-mono font-bold text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white flex items-center gap-1"
