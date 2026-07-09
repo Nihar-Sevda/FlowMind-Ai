@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { CalendarEvent } from '../types';
+import { CalendarEvent, Task } from '../types';
 import { Calendar, Plus, RefreshCw, AlertCircle, Clock, MapPin, Check, PlusCircle, CheckCircle2, ShieldAlert, Zap, Layers } from 'lucide-react';
 import { getAccessToken, connectGoogleCalendar } from '../firebase';
 
 interface CalendarDashboardProps {
+  tasks?: Task[];
+  onImportEventAsTask?: (event: CalendarEvent) => void;
   onAddFocusBlock?: (title: string, duration: number) => void;
   accentColor?: string;
   borderColor?: string;
@@ -15,7 +17,7 @@ const MOCK_EVENTS: CalendarEvent[] = [
   {
     id: 'mock-1',
     summary: '🧠 AI Flow Planning Session',
-    description: 'Establish priorities for the upcoming flow cycles with FlowMind.',
+    description: 'Establish priorities for the upcoming flow cycles with Kairox.',
     triagePriority: 'CRITICAL RESCUE',
     start: { dateTime: new Date(Date.now() + 1000 * 60 * 60 * 2).toISOString() }, // in 2 hours
     end: { dateTime: new Date(Date.now() + 1000 * 60 * 60 * 3).toISOString() }
@@ -50,7 +52,7 @@ function classifyEventPriority(summary: string): 'CRITICAL RESCUE' | 'STANDARD A
   return 'FLEXIBLE DEPTH';
 }
 
-export default function CalendarDashboard({ onAddFocusBlock, accentColor = 'bg-indigo-600', borderColor = 'border-zinc-800', textColor = 'text-indigo-400' }: CalendarDashboardProps) {
+export default function CalendarDashboard({ tasks = [], onImportEventAsTask, onAddFocusBlock, accentColor = 'bg-indigo-600', borderColor = 'border-zinc-800', textColor = 'text-indigo-400' }: CalendarDashboardProps) {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +60,61 @@ export default function CalendarDashboard({ onAddFocusBlock, accentColor = 'bg-i
   const [manualToken, setManualToken] = useState<string>('');
   const [showTokenInput, setShowTokenInput] = useState<boolean>(false);
   
+  // Merge synced tasks into events list
+  const getCombinedEvents = (): CalendarEvent[] => {
+    // Start with either Google Calendar events or mock fallback events
+    const baseEvents = events.length > 0 ? events : MOCK_EVENTS;
+    
+    // Add virtual events for any tasks that are calendarSynced
+    const syncedTaskEvents = (tasks || [])
+      .filter(task => task.calendarSynced)
+      .map((task) => {
+        // Parse dueDate if present, otherwise default to today
+        let eventDate = new Date();
+        if (task.dueDate) {
+          const parsed = new Date(task.dueDate + 'T10:00:00');
+          if (!isNaN(parsed.getTime())) {
+            eventDate = parsed;
+          }
+        }
+        
+        // Set to a reasonable time (e.g., 10:00 AM)
+        const start = new Date(eventDate);
+        const end = new Date(eventDate);
+        end.setMinutes(start.getMinutes() + 45); // 45 minutes duration
+        
+        return {
+          id: `task-event-${task.id}`,
+          summary: `🔥 RESCUE BLOCK: ${task.title}`,
+          description: `Urgency: ${task.urgency.toUpperCase()}. Sync source: Kairox Planner. Task Category: ${task.category}`,
+          triagePriority: task.urgency === 'critical' ? 'CRITICAL RESCUE' : task.urgency === 'high' ? 'CRITICAL RESCUE' : 'STANDARD ACTION',
+          start: { dateTime: start.toISOString() },
+          end: { dateTime: end.toISOString() }
+        } as CalendarEvent;
+      });
+
+    const combined = [...baseEvents];
+    syncedTaskEvents.forEach(syncedEvt => {
+      if (!combined.some(e => e.id === syncedEvt.id)) {
+        combined.push(syncedEvt);
+      }
+    });
+
+    return combined;
+  };
+
+  const displayEvents = getCombinedEvents();
+
+  // Check if calendar event exists as a task in our planner/tasks
+  const isAlreadyInPlanner = (event: CalendarEvent) => {
+    const cleanId = event.id.replace('task-event-', '');
+    const eventTitleClean = event.summary.replace('🔥 RESCUE BLOCK: ', '').toLowerCase().trim();
+    return (tasks || []).some(t => 
+      t.id === cleanId || 
+      t.title.toLowerCase().trim() === eventTitleClean
+    );
+  };
+
   // Layout states for different visualization views
   const [layoutMode, setLayoutMode] = useState<'timeline' | 'weekly' | 'monthly'>('timeline');
   const [weekOffset, setWeekOffset] = useState<number>(0);
@@ -97,7 +154,7 @@ export default function CalendarDashboard({ onAddFocusBlock, accentColor = 'bg-i
   // Helper: Get events for a specific local date
   const getEventsForDate = (date: Date) => {
     const dateString = date.toLocaleDateString([], { year: 'numeric', month: '2-digit', day: '2-digit' });
-    return events.filter(event => {
+    return displayEvents.filter(event => {
       const eventStartDate = event.start.dateTime || event.start.date;
       if (!eventStartDate) return false;
       const eventDateStr = new Date(eventStartDate).toLocaleDateString([], { year: 'numeric', month: '2-digit', day: '2-digit' });
@@ -364,7 +421,7 @@ export default function CalendarDashboard({ onAddFocusBlock, accentColor = 'bg-i
       {!isCloudSync && (
         <div className="mb-5 bg-gradient-to-tr from-indigo-500/5 to-purple-600/5 border border-indigo-500/10 p-4 rounded-2xl">
           <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mb-3 leading-normal font-sans">
-            FlowMind seamlessly scans your Google Calendar to auto-prioritize deadlines and build custom focus sessions.
+            Kairox seamlessly scans your Google Calendar to auto-prioritize deadlines and build custom focus sessions.
           </p>
           <button
             onClick={handleConnectGoogle}
@@ -515,13 +572,13 @@ export default function CalendarDashboard({ onAddFocusBlock, accentColor = 'bg-i
       {/* CONDITIONAL RENDER BY LAYOUT MODE */}
       {layoutMode === 'timeline' && (
         <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
-          {events.length === 0 ? (
+          {displayEvents.length === 0 ? (
             <div className="text-center py-8 text-zinc-500">
               <Calendar className="w-8 h-8 mx-auto mb-2 opacity-20" />
               <p className="text-xs font-sans">No scheduled timelines today</p>
             </div>
           ) : (
-            events.map((event) => {
+            displayEvents.map((event) => {
               const urgency = event.triagePriority || 'STANDARD ACTION';
               const urgencyColor = urgency === 'CRITICAL RESCUE' 
                 ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20' 
@@ -562,9 +619,29 @@ export default function CalendarDashboard({ onAddFocusBlock, accentColor = 'bg-i
                       {formatEventDate(event.start.dateTime || event.start.date)}
                     </span>
                     
-                    <span className={`text-[8px] uppercase font-mono tracking-wider font-extrabold px-1.5 py-0.5 rounded ${urgencyColor}`}>
-                      {urgency}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[8px] uppercase font-mono tracking-wider font-extrabold px-1.5 py-0.5 rounded ${urgencyColor}`}>
+                        {urgency}
+                      </span>
+                      {onImportEventAsTask && (
+                        isAlreadyInPlanner(event) ? (
+                          <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-mono font-bold flex items-center gap-0.5 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/10">
+                            <Check className="w-2.5 h-2.5" /> Synced
+                          </span>
+                        ) : (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onImportEventAsTask(event);
+                            }}
+                            className="px-2 py-0.5 bg-indigo-600 hover:bg-indigo-550 text-white dark:bg-indigo-500 dark:hover:bg-indigo-450 rounded-lg text-[9px] font-mono font-bold flex items-center gap-0.5 transition-all active:scale-[0.97] cursor-pointer"
+                          >
+                            <Plus className="w-2.5 h-2.5" />
+                            Import & Triage
+                          </button>
+                        )
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -632,9 +709,27 @@ export default function CalendarDashboard({ onAddFocusBlock, accentColor = 'bg-i
                                 {event.summary}
                               </span>
                             </div>
-                            <span className="text-[9px] font-mono text-zinc-400 shrink-0">
-                              {formatEventTime(event.start.dateTime || event.start.date)}
-                            </span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-[9px] font-mono text-zinc-400">
+                                {formatEventTime(event.start.dateTime || event.start.date)}
+                              </span>
+                              {onImportEventAsTask && (
+                                isAlreadyInPlanner(event) ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-500" title="Synced to planner" />
+                                ) : (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onImportEventAsTask(event);
+                                    }}
+                                    className="p-1 text-indigo-500 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-all cursor-pointer"
+                                    title="Import to Planner"
+                                  >
+                                    <Plus className="w-3.5 h-3.5" />
+                                  </button>
+                                )
+                              )}
+                            </div>
                           </div>
                         );
                       })}
@@ -761,50 +856,32 @@ export default function CalendarDashboard({ onAddFocusBlock, accentColor = 'bg-i
                           </p>
                         )}
                       </div>
-                      <span className="text-[9px] font-mono text-zinc-400 shrink-0">
-                        {formatEventTime(event.start.dateTime || event.start.date)}
-                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0 self-center">
+                        <span className="text-[9px] font-mono text-zinc-400">
+                          {formatEventTime(event.start.dateTime || event.start.date)}
+                        </span>
+                        {onImportEventAsTask && (
+                          isAlreadyInPlanner(event) ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-500" title="Synced to planner" />
+                          ) : (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onImportEventAsTask(event);
+                              }}
+                              className="p-1 text-indigo-500 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-all cursor-pointer"
+                              title="Import to Planner"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          )
+                        )}
+                      </div>
                     </div>
                   );
                 })}
               </div>
             )}
-          </div>
-        </div>
-      )}
-
-      {/* Manual Access Token fallback selector */}
-      <div className="mt-6 pt-4 border-t border-zinc-100 dark:border-zinc-900/40 text-center">
-        <button
-          onClick={() => setShowTokenInput(!showTokenInput)}
-          className="text-[10px] text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 font-sans underline"
-        >
-          {showTokenInput ? 'Hide access token controls' : 'Advanced: Paste Google OAuth Access Token manually'}
-        </button>
-      </div>
-
-      {showTokenInput && (
-        <div className="mt-3 p-4 rounded-2xl bg-amber-500/5 border border-amber-500/10 text-xs text-left">
-          <div className="flex gap-2 items-start text-amber-600 dark:text-amber-400 mb-2">
-            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-            <p className="font-sans text-[11px] leading-normal text-zinc-600 dark:text-zinc-400">
-              For manual sandbox development, paste an OAuth token below to fetch your personal calendars securely.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <input
-              type="password"
-              placeholder="Google Access Token"
-              value={manualToken}
-              onChange={(e) => setManualToken(e.target.value)}
-              className="flex-1 px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl font-mono text-[11px] focus:outline-none focus:border-indigo-500 text-zinc-800 dark:text-zinc-100"
-            />
-            <button
-              onClick={saveManualToken}
-              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-sans text-xs font-semibold hover:shadow cursor-pointer"
-            >
-              Link
-            </button>
           </div>
         </div>
       )}

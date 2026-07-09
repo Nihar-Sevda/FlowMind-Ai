@@ -1,5 +1,7 @@
 export class AmbienceSynth {
   private ctx: AudioContext | null = null;
+  private masterGain: GainNode | null = null;
+  private volume: number = 0.5; // Default 50% volume
   private nodes: {
     sourceNoise?: AudioWorkletNode | AudioBufferSourceNode;
     oscillators?: OscillatorNode[];
@@ -17,9 +19,37 @@ export class AmbienceSynth {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       this.ctx = new AudioCtx();
     }
-    if (this.ctx.state === 'suspended') {
+    if (!this.masterGain && this.ctx) {
+      this.masterGain = this.ctx.createGain();
+      this.masterGain.gain.setValueAtTime(this.volume, this.ctx.currentTime);
+      this.masterGain.connect(this.ctx.destination);
+    }
+    if (this.ctx && this.ctx.state === 'suspended') {
       this.ctx.resume();
     }
+  }
+
+  public resume() {
+    this.initCtx();
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(e => console.warn('Failed to resume AudioContext:', e));
+    }
+  }
+
+  public setVolume(val: number) {
+    this.volume = Math.max(0, Math.min(1, val));
+    if (this.ctx && this.masterGain) {
+      this.masterGain.gain.setValueAtTime(this.volume, this.ctx.currentTime);
+    }
+  }
+
+  public getVolume(): number {
+    return this.volume;
+  }
+
+  private getDestination(): AudioNode {
+    this.initCtx();
+    return this.masterGain || this.ctx!.destination;
   }
 
   // Generate a 2-second buffer of white noise
@@ -103,7 +133,7 @@ export class AmbienceSynth {
       sizzleFilter.connect(sizzleGain);
       sizzleGain.connect(mainGain);
 
-      mainGain.connect(this.ctx.destination);
+      mainGain.connect(this.getDestination());
 
       noise.start();
       sizzleNoise.start();
@@ -123,7 +153,7 @@ export class AmbienceSynth {
         gainNode.gain.exponentialRampToValueAtTime(0.0001, dripTime + 0.08);
 
         osc.connect(gainNode);
-        gainNode.connect(this.ctx.destination);
+        gainNode.connect(this.getDestination());
         osc.start(dripTime);
         osc.stop(dripTime + 0.1);
       };
@@ -154,7 +184,7 @@ export class AmbienceSynth {
 
         thunderNoise.connect(filter);
         filter.connect(gain);
-        gain.connect(this.ctx.destination);
+        gain.connect(this.getDestination());
         
         thunderNoise.start(clickTime);
         thunderNoise.stop(clickTime + 9.5);
@@ -224,7 +254,7 @@ export class AmbienceSynth {
       rainNoise.connect(bandpass);
       bandpass.connect(lowpass);
       lowpass.connect(rainGain);
-      rainGain.connect(this.ctx.destination);
+      rainGain.connect(this.getDestination());
 
       rainNoise.start();
 
@@ -243,7 +273,7 @@ export class AmbienceSynth {
         gainNode.gain.exponentialRampToValueAtTime(0.0001, dripTime + 0.07);
 
         osc.connect(gainNode);
-        gainNode.connect(this.ctx.destination);
+        gainNode.connect(this.getDestination());
         osc.start(dripTime);
         osc.stop(dripTime + 0.09);
       };
@@ -270,7 +300,7 @@ export class AmbienceSynth {
 
       windNoise.connect(windFilter);
       windFilter.connect(windGain);
-      windGain.connect(this.ctx.destination);
+      windGain.connect(this.getDestination());
       windNoise.start();
 
       const stormWindInterval = setInterval(() => {
@@ -325,7 +355,7 @@ export class AmbienceSynth {
         thunderNoise.connect(filter);
         filter.connect(shelf);
         shelf.connect(gain);
-        gain.connect(this.ctx.destination);
+        gain.connect(this.getDestination());
 
         thunderNoise.start(clickTime);
         thunderNoise.stop(clickTime + duration);
@@ -402,7 +432,7 @@ export class AmbienceSynth {
       droneFilter.frequency.setValueAtTime(450, this.ctx.currentTime);
 
       masterGain.connect(droneFilter);
-      droneFilter.connect(this.ctx.destination);
+      droneFilter.connect(this.getDestination());
 
       this.nodes.oscillators = oscs;
       this.nodes.gainNodes = [...gains, masterGain];
@@ -426,7 +456,7 @@ export class AmbienceSynth {
       mainGain.gain.setValueAtTime(0.08, this.ctx.currentTime); // gentle volume
       
       noise.connect(mainGain);
-      mainGain.connect(this.ctx.destination);
+      mainGain.connect(this.getDestination());
       noise.start();
       
       this.nodes.sourceNoise = noise;
@@ -459,7 +489,7 @@ export class AmbienceSynth {
 
       crackleNoise.connect(bandpass);
       bandpass.connect(crackleGain);
-      crackleGain.connect(this.ctx.destination);
+      crackleGain.connect(this.getDestination());
       crackleNoise.start();
 
       // 2. Continuous mellow low-frequency pad
@@ -481,7 +511,7 @@ export class AmbienceSynth {
       padOsc1.connect(lpFilter);
       padOsc2.connect(lpFilter);
       lpFilter.connect(padGain);
-      padGain.connect(this.ctx.destination);
+      padGain.connect(this.getDestination());
 
       padOsc1.start();
       padOsc2.start();
@@ -517,7 +547,7 @@ export class AmbienceSynth {
 
           osc.connect(rhodesFilter);
           rhodesFilter.connect(gain);
-          gain.connect(this.ctx.destination);
+          gain.connect(this.getDestination());
 
           osc.start(playTime);
           osc.stop(playTime + 4.0);
@@ -565,7 +595,7 @@ export class AmbienceSynth {
 
       hissSource.connect(hissFilter);
       hissFilter.connect(hissGain);
-      hissGain.connect(this.ctx.destination);
+      hissGain.connect(this.getDestination());
       hissSource.start();
 
       (this as any).lofi2HissSource = hissSource;
@@ -586,7 +616,7 @@ export class AmbienceSynth {
         gainNode.gain.exponentialRampToValueAtTime(0.0001, time + 0.005 + Math.random() * 0.01);
 
         osc.connect(gainNode);
-        gainNode.connect(this.ctx.destination);
+        gainNode.connect(this.getDestination());
         osc.start(time);
         osc.stop(time + 0.02);
       };
@@ -621,7 +651,7 @@ export class AmbienceSynth {
         gainNode.gain.exponentialRampToValueAtTime(0.0001, time + 0.18);
 
         osc.connect(gainNode);
-        gainNode.connect(this.ctx.destination);
+        gainNode.connect(this.getDestination());
         osc.start(time);
         osc.stop(time + 0.2);
       };
@@ -653,10 +683,10 @@ export class AmbienceSynth {
 
         noise.connect(filter);
         filter.connect(gainNode);
-        gainNode.connect(this.ctx.destination);
+        gainNode.connect(this.getDestination());
 
         osc.connect(oscGain);
-        oscGain.connect(this.ctx.destination);
+        oscGain.connect(this.getDestination());
 
         noise.start(time);
         noise.stop(time + 0.2);
@@ -680,7 +710,7 @@ export class AmbienceSynth {
 
         noise.connect(filter);
         filter.connect(gainNode);
-        gainNode.connect(this.ctx.destination);
+        gainNode.connect(this.getDestination());
 
         noise.start(time);
         noise.stop(time + 0.05);
@@ -716,7 +746,7 @@ export class AmbienceSynth {
 
           osc.connect(lpFilter);
           lpFilter.connect(gainNode);
-          gainNode.connect(this.ctx.destination);
+          gainNode.connect(this.getDestination());
 
           osc.start(noteStartTime);
           osc.stop(noteStartTime + 4.2);
@@ -777,7 +807,7 @@ export class AmbienceSynth {
       const notes = [392.00, 523.25, 659.25, 783.99, 1046.50];
       const masterChimeGain = this.ctx.createGain();
       masterChimeGain.gain.setValueAtTime(0.10, now);
-      masterChimeGain.connect(this.ctx.destination);
+      masterChimeGain.connect(this.getDestination());
 
       notes.forEach((freq, idx) => {
         if (!this.ctx) return;

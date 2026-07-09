@@ -68,3 +68,13 @@ export interface QuickNote {
   topic?: string;
 }
 
+export interface FocusSession {
+  id: string;
+  timestamp: string; // ISO string
+  durationMinutes: number;
+  mode: TimerMode;
+  taskTitle?: string;
+  companionName: string;
+}
+
+

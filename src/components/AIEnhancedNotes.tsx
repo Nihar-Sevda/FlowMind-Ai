@@ -28,7 +28,7 @@ interface AIEnhancedNotesProps {
 export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPersonality }: AIEnhancedNotesProps) {
   const [activeSubTab, setActiveSubTab] = useState<'scratchpad' | 'splitter'>('scratchpad');
   const [notes, setNotes] = useState<QuickNote[]>(() => {
-    const saved = localStorage.getItem('flowmind_quick_notes');
+    const saved = localStorage.getItem('kairos_quick_notes');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -41,7 +41,7 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
     return [
       {
         id: 'n1',
-        title: isHinglish ? '🌟 FlowMind Ka Main Plan' : '🌟 FlowMind Main Strategy',
+        title: isHinglish ? '🌟 Kairox Ka Main Plan' : '🌟 Kairox Main Strategy',
         topic: 'Productivity',
         content: isHinglish 
           ? '### Raw Thoughts\n- Hame har kaam ko delay (procrastinate) karne se bachna hai.\n- Pomodoro sessions active focus maintain karne me help karte hain.\n- AI companion tension aur pressure kam karne ke liye tips dega.'
@@ -179,7 +179,7 @@ export default function AIEnhancedNotes({ lang, t, onAddMultipleTasks, currentPe
 
   // Sync notes to local storage
   useEffect(() => {
-    localStorage.setItem('flowmind_quick_notes', JSON.stringify(notes));
+    localStorage.setItem('kairos_quick_notes', JSON.stringify(notes));
   }, [notes]);
 
   const handleSaveNote = (e: React.FormEvent) => {

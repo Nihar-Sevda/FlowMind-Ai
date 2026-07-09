@@ -1,5 +1,5 @@
 {
-  "name": "FlowMind App",
+  "name": "Kairox",
   "description": "High-stakes AI-powered deadline rescue companion that proactively triages schedules, designs action plans, and prevents procrastination.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

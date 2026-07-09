@@ -98,7 +98,7 @@ export default function SlideToUnlock({ onUnlocked }: SlideToUnlockProps) {
           className="text-[10px] font-mono tracking-widest text-zinc-400 dark:text-zinc-500 uppercase animate-pulse select-none pl-6"
           style={{ opacity: Math.max(0, 1 - (slideProgress / 60)) }}
         >
-          {isSuccess ? 'Flow Activated' : 'Slide to enter FlowMind'}
+          {isSuccess ? 'Flow Activated' : 'Slide to enter Kairox'}
         </span>
       </div>
 

@@ -30,7 +30,7 @@ let cachedAccessToken: string | null = null;
 // Fallback local accounts database helpers
 const getLocalAccounts = (): Record<string, { passwordHash: string; displayName?: string }> => {
   try {
-    const raw = localStorage.getItem('flowmind_local_accounts');
+    const raw = localStorage.getItem('kairos_local_accounts');
     return raw ? JSON.parse(raw) : {};
   } catch {
     return {};
@@ -39,7 +39,7 @@ const getLocalAccounts = (): Record<string, { passwordHash: string; displayName?
 
 const saveLocalAccounts = (accounts: Record<string, { passwordHash: string; displayName?: string }>) => {
   try {
-    localStorage.setItem('flowmind_local_accounts', JSON.stringify(accounts));
+    localStorage.setItem('kairos_local_accounts', JSON.stringify(accounts));
   } catch (err) {
     console.error('Failed to save local accounts:', err);
   }
@@ -51,7 +51,7 @@ export const initAuth = (
   onAuthFailure?: () => void
 ) => {
   // First check if there is a active local session
-  const localSessionRaw = localStorage.getItem('flowmind_local_session');
+  const localSessionRaw = localStorage.getItem('kairos_local_session');
   if (localSessionRaw) {
     try {
       const localUser = JSON.parse(localSessionRaw);
@@ -104,7 +104,7 @@ export const loginWithEmail = async (email: string, password: string): Promise<U
         photoURL: null,
       } as unknown as User;
       
-      localStorage.setItem('flowmind_local_session', JSON.stringify(mockUser));
+      localStorage.setItem('kairos_local_session', JSON.stringify(mockUser));
       return mockUser;
     }
 
@@ -155,7 +155,7 @@ export const registerWithEmail = async (email: string, password: string): Promis
         photoURL: null,
       } as unknown as User;
       
-      localStorage.setItem('flowmind_local_session', JSON.stringify(mockUser));
+      localStorage.setItem('kairos_local_session', JSON.stringify(mockUser));
       return mockUser;
     }
     throw error;
@@ -216,5 +216,5 @@ export const logout = async () => {
   await auth.signOut();
   cachedAccessToken = null;
   sessionStorage.removeItem('gcal_temp_access_token');
-  localStorage.removeItem('flowmind_local_session');
+  localStorage.removeItem('kairos_local_session');
 };

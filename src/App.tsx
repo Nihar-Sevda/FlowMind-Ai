@@ -2,20 +2,22 @@ import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import { motion, AnimatePresence } from 'motion/react';
 import { synthManager } from './utils/audioSynth';
-import { AIPersonality, Task, TimerMode } from './types';
+import { AIPersonality, Task, TimerMode, FocusSession, CalendarEvent } from './types';
 import { AI_PERSONALITIES } from './data/personalities';
 import PersonalityQuiz from './components/PersonalityQuiz';
 import SlideToUnlock from './components/SlideToUnlock';
+import TutorialOverlay from './components/TutorialOverlay';
 import FocusTimer from './components/FocusTimer';
 import CalendarDashboard from './components/CalendarDashboard';
 import AIOrbChat from './components/AIOrbChat';
 import AIEnhancedNotes from './components/AIEnhancedNotes';
 import RescueChart from './components/RescueChart';
 import EnergyBurnoutAnalytics from './components/EnergyBurnoutAnalytics';
-import { auth, googleSignIn, initAuth, logout, loginWithEmail, registerWithEmail } from './firebase';
+import FocusHistory from './components/FocusHistory';
+import { auth, googleSignIn, initAuth, logout, loginWithEmail, registerWithEmail, getAccessToken } from './firebase';
 import { User } from 'firebase/auth';
 import { TRANSLATIONS, TranslationSet, TRANSLATE_URGENCY, USER_MODE_PREDICTIONS } from './data/translations';
-import { LogOut, Bell, BellOff, Languages } from 'lucide-react';
+import { LogOut, Bell, BellOff, Languages, Download } from 'lucide-react';
 import { 
   Compass, 
   Sparkles, 
@@ -67,26 +69,26 @@ export default function App() {
 
   // Theme state (persistent, defaults to dark eye-safe matte black)
   const [darkMode, setDarkMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem('flowmind_dark_mode');
+    const saved = localStorage.getItem('kairos_dark_mode');
     return saved ? saved === 'true' : true;
   });
 
   // Selected companion personality state
   const [currentPersonality, setCurrentPersonality] = useState<AIPersonality>(() => {
-    const saved = localStorage.getItem('flowmind_selected_personality_id');
+    const saved = localStorage.getItem('kairos_selected_personality_id');
     const matched = AI_PERSONALITIES.find(p => p.id === saved);
     return matched || AI_PERSONALITIES[1]; // default to No-Nonsense Coach for crisis theme
   });
 
   // Check if onboarding diagnostic test is needed
   const [isOnboarding, setIsOnboarding] = useState<boolean>(() => {
-    return !localStorage.getItem('flowmind_selected_personality_id');
+    return !localStorage.getItem('kairos_selected_personality_id');
   });
-  const [onboardingStep, setOnboardingStep] = useState<'intro' | 'quiz'>('intro');
+  const [onboardingStep, setOnboardingStep] = useState<'intro' | 'tutorial' | 'quiz'>('intro');
 
   // Custom Category Colors
   const [categoryColors, setCategoryColors] = useState<Record<string, string>>(() => {
-    const saved = localStorage.getItem('flowmind_category_colors');
+    const saved = localStorage.getItem('kairos_category_colors');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -104,7 +106,7 @@ export default function App() {
   });
 
   const [availableCategories, setAvailableCategories] = useState<string[]>(() => {
-    const saved = localStorage.getItem('flowmind_available_categories');
+    const saved = localStorage.getItem('kairos_available_categories');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -135,16 +137,16 @@ export default function App() {
   };
 
   useEffect(() => {
-    localStorage.setItem('flowmind_category_colors', JSON.stringify(categoryColors));
+    localStorage.setItem('kairos_category_colors', JSON.stringify(categoryColors));
   }, [categoryColors]);
 
   useEffect(() => {
-    localStorage.setItem('flowmind_available_categories', JSON.stringify(availableCategories));
+    localStorage.setItem('kairos_available_categories', JSON.stringify(availableCategories));
   }, [availableCategories]);
 
   // Sidebar collapsed state
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
-    return localStorage.getItem('flowmind_sidebar_collapsed') === 'true';
+    return localStorage.getItem('kairos_sidebar_collapsed') === 'true';
   });
 
   // Active dynamic companion advice states
@@ -154,14 +156,14 @@ export default function App() {
   const toggleSidebar = () => {
     setSidebarCollapsed(prev => {
       const newVal = !prev;
-      localStorage.setItem('flowmind_sidebar_collapsed', String(newVal));
+      localStorage.setItem('kairos_sidebar_collapsed', String(newVal));
       return newVal;
     });
   };
 
   // Task list state (persistent rescue targets)
   const [tasks, setTasks] = useState<Task[]>(() => {
-    const saved = localStorage.getItem('flowmind_tasks');
+    const saved = localStorage.getItem('kairos_tasks');
     if (saved) {
       try { return JSON.parse(saved); } catch { return []; }
     }
@@ -206,7 +208,7 @@ export default function App() {
 
   // Tracks checked-off individual survival steps for any task
   const [completedSurvivalSteps, setCompletedSurvivalSteps] = useState<Record<string, Record<string, boolean>>>(() => {
-    const saved = localStorage.getItem('flowmind_survival_steps');
+    const saved = localStorage.getItem('kairos_survival_steps');
     if (saved) {
       try { return JSON.parse(saved); } catch { return {}; }
     }
@@ -215,7 +217,7 @@ export default function App() {
 
   // Local productivity stats
   const [completedPomodoros, setCompletedPomodoros] = useState<number>(() => {
-    return Number(localStorage.getItem('flowmind_pomodoros') || '4');
+    return Number(localStorage.getItem('kairos_pomodoros') || '4');
   });
 
   // New task form state
@@ -237,6 +239,39 @@ export default function App() {
   const [greeting, setGreeting] = useState<string>('Initiate Rescue sequence');
   const [currentTime, setCurrentTime] = useState<string>('');
   const [selectedTaskForFocus, setSelectedTaskForFocus] = useState<string>('');
+
+  const [focusSessions, setFocusSessions] = useState<FocusSession[]>(() => {
+    const saved = localStorage.getItem('kairos_focus_sessions');
+    if (saved) {
+      try { return JSON.parse(saved); } catch {}
+    }
+    return [
+      {
+        id: 'sess-1',
+        timestamp: new Date(Date.now() - 3600 * 1000 * 3).toISOString(),
+        durationMinutes: 25,
+        mode: 'work',
+        taskTitle: 'Isolate client dashboard schema',
+        companionName: 'Coach'
+      },
+      {
+        id: 'sess-2',
+        timestamp: new Date(Date.now() - 3600 * 1000 * 24).toISOString(),
+        durationMinutes: 25,
+        mode: 'work',
+        taskTitle: 'Audit legacy workspace integration rules',
+        companionName: 'Mentor'
+      },
+      {
+        id: 'sess-3',
+        timestamp: new Date(Date.now() - 3600 * 1000 * 48).toISOString(),
+        durationMinutes: 15,
+        mode: 'longBreak',
+        taskTitle: 'Breathing break & hydration',
+        companionName: 'Philosopher'
+      }
+    ];
+  });
 
   // 5-Minute Micro-Start results
   const [microStarts, setMicroStarts] = useState<Record<string, { action: string; encouragement: string; loading: boolean }>>({});
@@ -288,13 +323,49 @@ export default function App() {
 
   // Language support ('en' | 'hinglish')
   const [lang, setLang] = useState<'en' | 'hinglish'>(() => {
-    return (localStorage.getItem('flowmind_lang') as 'en' | 'hinglish') || 'en';
+    return (localStorage.getItem('kairos_lang') as 'en' | 'hinglish') || 'en';
   });
 
   const handleToggleLang = () => {
     const nextLang = lang === 'en' ? 'hinglish' : 'en';
     setLang(nextLang);
-    localStorage.setItem('flowmind_lang', nextLang);
+    localStorage.setItem('kairos_lang', nextLang);
+  };
+
+  const handleExportData = () => {
+    const stats = {
+      completedPomodoros: completedPomodoros,
+      totalTasks: tasks.length,
+      completedTasks: tasks.filter(t => t.completed).length,
+      activeTasks: tasks.filter(t => !t.completed).length,
+      urgencyDistribution: {
+        critical: tasks.filter(t => t.urgency === 'critical').length,
+        high: tasks.filter(t => t.urgency === 'high').length,
+        medium: tasks.filter(t => t.urgency === 'medium').length,
+        low: tasks.filter(t => t.urgency === 'low').length,
+      }
+    };
+
+    const exportPayload = {
+      app: "Kairox Focus & Productivity Companion",
+      exportDate: new Date().toISOString(),
+      productivityStats: stats,
+      tasks: tasks,
+      survivalSteps: completedSurvivalSteps,
+      languagePreference: lang,
+      bareMinimumModePreference: bareMinimumMode,
+      selectedCompanion: currentPersonality.name
+    };
+
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(
+      JSON.stringify(exportPayload, null, 2)
+    );
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `kairox_export_${new Date().toISOString().substring(0, 10)}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
   };
 
   // Browser-level exit interception hook
@@ -322,14 +393,14 @@ export default function App() {
   // Push notification state
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
-      return Notification.permission === 'granted' && localStorage.getItem('flowmind_notifications') === 'true';
+      return Notification.permission === 'granted' && localStorage.getItem('kairos_notifications') === 'true';
     }
     return false;
   });
 
   // Bare Minimum Mode state
   const [bareMinimumMode, setBareMinimumMode] = useState<boolean>(() => {
-    return localStorage.getItem('flowmind_bare_minimum_mode') === 'true';
+    return localStorage.getItem('kairos_bare_minimum_mode') === 'true';
   });
 
   // Translation helper
@@ -376,16 +447,16 @@ export default function App() {
 
   // Zen Cooldown Day mode state
   const [isZenCooldownActive, setIsZenCooldownActive] = useState<boolean>(() => {
-    return localStorage.getItem('flowmind_zen_cooldown') === 'true';
+    return localStorage.getItem('kairos_zen_cooldown') === 'true';
   });
 
   const handleToggleZenCooldown = (active: boolean) => {
     setIsZenCooldownActive(active);
-    localStorage.setItem('flowmind_zen_cooldown', String(active));
+    localStorage.setItem('kairos_zen_cooldown', String(active));
     if (active) {
       showToast(lang === 'hinglish' ? "Zen Cooldown Rest Mode active ho gaya hai!" : "Zen Cooldown Rest Mode activated!", () => {
         setIsZenCooldownActive(false);
-        localStorage.setItem('flowmind_zen_cooldown', 'false');
+        localStorage.setItem('kairos_zen_cooldown', 'false');
       });
     } else {
       synthManager.stop();
@@ -413,14 +484,14 @@ export default function App() {
     } else {
       root.classList.remove('dark');
     }
-    localStorage.setItem('flowmind_dark_mode', String(darkMode));
+    localStorage.setItem('kairos_dark_mode', String(darkMode));
   }, [darkMode]);
 
   // 2. User-specific task loading and saving
   useEffect(() => {
     const uid = currentUser ? currentUser.uid : 'guest';
     if (uid !== prevUserId) {
-      const userTasksKey = currentUser ? `flowmind_tasks_${currentUser.uid}` : 'flowmind_tasks';
+      const userTasksKey = currentUser ? `kairos_tasks_${currentUser.uid}` : 'kairos_tasks';
       const saved = localStorage.getItem(userTasksKey);
       if (saved) {
         try {
@@ -434,7 +505,7 @@ export default function App() {
           setTasks([]);
         } else {
           // Guest defaults
-          const guestSaved = localStorage.getItem('flowmind_tasks');
+          const guestSaved = localStorage.getItem('kairos_tasks');
           if (guestSaved) {
             try { setTasks(JSON.parse(guestSaved)); } catch { setTasks([]); }
           }
@@ -446,23 +517,28 @@ export default function App() {
 
   // Sync tasks to correct key whenever tasks or currentUser changes
   useEffect(() => {
-    const userTasksKey = currentUser ? `flowmind_tasks_${currentUser.uid}` : 'flowmind_tasks';
+    const userTasksKey = currentUser ? `kairos_tasks_${currentUser.uid}` : 'kairos_tasks';
     localStorage.setItem(userTasksKey, JSON.stringify(tasks));
   }, [tasks, currentUser]);
 
   useEffect(() => {
-    localStorage.setItem('flowmind_survival_steps', JSON.stringify(completedSurvivalSteps));
+    localStorage.setItem('kairos_survival_steps', JSON.stringify(completedSurvivalSteps));
   }, [completedSurvivalSteps]);
 
   // Sync language selection
   useEffect(() => {
-    localStorage.setItem('flowmind_lang', lang);
+    localStorage.setItem('kairos_lang', lang);
   }, [lang]);
 
   // Sync Bare Minimum Mode selection
   useEffect(() => {
-    localStorage.setItem('flowmind_bare_minimum_mode', String(bareMinimumMode));
+    localStorage.setItem('kairos_bare_minimum_mode', String(bareMinimumMode));
   }, [bareMinimumMode]);
+
+  // Sync Focus Sessions
+  useEffect(() => {
+    localStorage.setItem('kairos_focus_sessions', JSON.stringify(focusSessions));
+  }, [focusSessions]);
 
   // Push notification permission request helper
   const requestNotificationPermission = async () => {
@@ -470,11 +546,11 @@ export default function App() {
       const permission = await Notification.requestPermission();
       if (permission === 'granted') {
         setNotificationsEnabled(true);
-        localStorage.setItem('flowmind_notifications', 'true');
+        localStorage.setItem('kairos_notifications', 'true');
         const title = lang === 'hinglish' ? '🔔 Notifications active hain!' : '🔔 Reminders Enabled!';
         const body = lang === 'hinglish'
-          ? 'FlowMind ab aapko critical deadlines ke baare me update rakhega.'
-          : 'FlowMind will now keep you accountable for critical deadlines.';
+          ? 'Kairox ab aapko critical deadlines ke baare me update rakhega.'
+          : 'Kairox will now keep you accountable for critical deadlines.';
         try {
           new Notification(title, { body });
         } catch (e) {
@@ -482,7 +558,7 @@ export default function App() {
         }
       } else {
         setNotificationsEnabled(false);
-        localStorage.setItem('flowmind_notifications', 'false');
+        localStorage.setItem('kairos_notifications', 'false');
       }
     } else {
       alert(lang === 'hinglish' ? 'Yeh browser notifications support nahi karta.' : 'This browser does not support push notifications.');
@@ -504,7 +580,7 @@ export default function App() {
         
         if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
           try {
-            new Notification(title, { body, tag: 'flowmind-alert' });
+            new Notification(title, { body, tag: 'kairos-alert' });
           } catch (e) {
             console.error('Failed to trigger background notification:', e);
           }
@@ -538,7 +614,7 @@ export default function App() {
       console.error('Email Auth Error:', error);
       let errMsg = 'Authentication failed. Please check your credentials.';
       if (error.code === 'auth/operation-not-allowed') {
-        errMsg = "Email & Password login is disabled on this Firebase project. Please use the recommended 'Sign In with Google' option below to access FlowMind instantly.";
+        errMsg = "Email & Password login is disabled on this Firebase project. Please use the recommended 'Sign In with Google' option below to access Kairox instantly.";
       } else if (error.code === 'auth/wrong-password' || error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
         errMsg = 'Invalid email or password.';
       } else if (error.code === 'auth/email-already-in-use') {
@@ -601,7 +677,7 @@ export default function App() {
 
   const handleSelectPersonality = (p: AIPersonality) => {
     setCurrentPersonality(p);
-    localStorage.setItem('flowmind_selected_personality_id', p.id);
+    localStorage.setItem('kairos_selected_personality_id', p.id);
     setIsOnboarding(false);
     setShowQuizModal(false);
     setActiveAdvice('');
@@ -627,6 +703,10 @@ export default function App() {
     if (!customTitle) {
       setNewTaskTitle('');
     }
+
+    if (newTask.dueDate) {
+      handleSyncTaskToCalendar(newTask, true);
+    }
   };
 
   const handleAddMultipleTasks = (newTasksList: Omit<Task, 'id' | 'completed' | 'calendarSynced'>[]) => {
@@ -637,6 +717,12 @@ export default function App() {
       calendarSynced: false
     }));
     setTasks(prev => [...formatted, ...prev]);
+
+    formatted.forEach(task => {
+      if (task.dueDate) {
+        handleSyncTaskToCalendar(task, true);
+      }
+    });
   };
 
   const handleToggleTask = (id: string) => {
@@ -777,19 +863,25 @@ export default function App() {
   };
 
   // Handle Google Calendar sync for any high-stakes task
-  const handleSyncTaskToCalendar = async (task: Task) => {
+  const handleSyncTaskToCalendar = async (task: Task, silent = false) => {
     try {
+      const startTimeDate = task.dueDate ? new Date(task.dueDate + 'T10:00:00') : new Date(Date.now() + 1000 * 60 * 10);
+      const endTimeDate = new Date(startTimeDate);
+      endTimeDate.setMinutes(endTimeDate.getMinutes() + 45); // 45 minute block
+
+      const activeToken = (await getAccessToken()) || localStorage.getItem('gcal_access_token') || '';
+
       const response = await fetch('/api/calendar/events', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('gcal_access_token') || ''}`
+          'Authorization': `Bearer ${activeToken}`
         },
         body: JSON.stringify({
           summary: `🔥 RESCUE BLOCK: ${task.title}`,
-          description: `Scheduled via FlowMind. Priority: ${task.triagePriority || 'HIGH'}. Explanation: ${task.priorityExplanation || 'No description'}`,
-          startTime: new Date(Date.now() + 1000 * 60 * 10).toISOString(), // start in 10 mins
-          endTime: new Date(Date.now() + 1000 * 60 * 35).toISOString() // end in 35 mins (25min block)
+          description: `Scheduled via Kairox. Priority: ${task.triagePriority || 'HIGH'}. Explanation: ${task.priorityExplanation || 'No description'}`,
+          startTime: startTimeDate.toISOString(),
+          endTime: endTimeDate.toISOString()
         })
       });
 
@@ -798,19 +890,115 @@ export default function App() {
       }
 
       setTasks(prev => prev.map(t => t.id === task.id ? { ...t, calendarSynced: true } : t));
-      alert(`Synchronized "${task.title}" to Google Calendar successfully!`);
+      if (!silent) {
+        alert(`Synchronized "${task.title}" to Google Calendar successfully!`);
+      } else {
+        showToast(`Auto-synced "${task.title}" to Google Calendar!`);
+      }
     } catch {
       // Simulate/fallback
       setTasks(prev => prev.map(t => t.id === task.id ? { ...t, calendarSynced: true } : t));
-      alert(`Simulated calendar sync successful! Timelines updated.`);
+      if (!silent) {
+        alert(`Simulated calendar sync successful! Timelines updated.`);
+      } else {
+        showToast(`Auto-synced "${task.title}" placeholder in calendar!`);
+      }
     }
   };
 
+  const handleImportCalendarEventAsTask = (event: CalendarEvent) => {
+    const cleanId = event.id.replace('task-event-', '');
+    const eventTitleClean = event.summary.replace('🔥 RESCUE BLOCK: ', '').trim();
+    
+    const isDuplicate = tasks.some(t => 
+      t.id === cleanId || 
+      t.title.toLowerCase().trim() === eventTitleClean.toLowerCase()
+    );
+
+    if (isDuplicate) {
+      alert(`"${eventTitleClean}" is already in your Deadline Planner.`);
+      return;
+    }
+
+    let urgency: 'critical' | 'high' | 'medium' | 'low' = 'medium';
+    if (event.triagePriority === 'CRITICAL RESCUE') {
+      urgency = 'critical';
+    } else if (event.triagePriority === 'STANDARD ACTION') {
+      urgency = 'high';
+    } else if (event.triagePriority === 'FLEXIBLE DEPTH') {
+      urgency = 'medium';
+    } else {
+      const norm = eventTitleClean.toLowerCase();
+      if (norm.includes('deadline') || norm.includes('exam') || norm.includes('test') || norm.includes('crit') || norm.includes('launch') || norm.includes('urgent')) {
+        urgency = 'critical';
+      } else if (norm.includes('meeting') || norm.includes('work') || norm.includes('code') || norm.includes('sync')) {
+        urgency = 'high';
+      }
+    }
+
+    let dueDate = new Date().toISOString().substring(0, 10);
+    const eventStartDate = event.start.dateTime || event.start.date;
+    if (eventStartDate) {
+      try {
+        dueDate = new Date(eventStartDate).toISOString().substring(0, 10);
+      } catch {}
+    }
+
+    const newTask: Task = {
+      id: cleanId,
+      title: eventTitleClean,
+      completed: false,
+      dueDate: dueDate,
+      urgency: urgency,
+      category: 'Calendar Import',
+      calendarSynced: true,
+      priorityExplanation: event.description || 'Imported from connected Google Calendar.',
+      triagePriority: event.triagePriority
+    };
+
+    setTasks(prev => [newTask, ...prev]);
+    setActiveTab('planner');
+    
+    // Auto-triage
+    setTimeout(() => {
+      handleAITriageTask(newTask);
+    }, 400);
+
+    showToast(`"${eventTitleClean}" imported and added to Deadline Planner!`);
+  };
+
   const handleFocusSessionComplete = (mode: TimerMode) => {
+    // 1. Calculate duration based on custom timer configurations
+    const savedModes = localStorage.getItem('kairos_custom_timer_modes');
+    let durationMins = mode === 'work' ? 25 : mode === 'shortBreak' ? 5 : 15;
+    if (savedModes) {
+      try {
+        const parsed = JSON.parse(savedModes);
+        if (parsed[mode]) {
+          durationMins = Math.round(parsed[mode] / 60);
+        }
+      } catch {}
+    }
+
+    // 2. Add focus session record to state
+    const newSession: FocusSession = {
+      id: `sess-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      durationMinutes: durationMins,
+      mode: mode,
+      taskTitle: mode === 'work' ? (selectedTaskForFocus || 'General Deep Work') : `${mode === 'shortBreak' ? 'Short' : 'Long'} Recovery Break`,
+      companionName: currentPersonality.name
+    };
+
+    setFocusSessions(prev => [newSession, ...prev]);
+
+    // 3. Clear focus task target lock
     if (mode === 'work') {
+      setSelectedTaskForFocus('');
+      
       const nextPomodoros = completedPomodoros + 1;
       setCompletedPomodoros(nextPomodoros);
-      localStorage.setItem('flowmind_pomodoros', String(nextPomodoros));
+      localStorage.setItem('kairos_pomodoros', String(nextPomodoros));
       
       // Personalized bonus suggestors based on companion
       const suggestions: Record<string, string> = {
@@ -985,7 +1173,7 @@ export default function App() {
       <div className="min-h-screen flex items-center justify-center bg-[#faf9f5] dark:bg-zinc-950 text-zinc-800 dark:text-zinc-250">
         <div className="flex flex-col items-center gap-4">
           <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-          <p className="font-mono text-sm text-zinc-500 animate-pulse">Initializing FlowMind Rescue Hub...</p>
+          <p className="font-mono text-sm text-zinc-500 animate-pulse">Initializing Kairox Rescue Hub...</p>
         </div>
       </div>
     );
@@ -1004,7 +1192,7 @@ export default function App() {
           </div>
           
           <h1 className="font-display font-extrabold text-2xl tracking-tight text-zinc-950 dark:text-white mb-1">
-            FlowMind AI Hub
+            Kairox AI Hub
           </h1>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-6 max-w-xs mx-auto">
             Your high-stakes, crisis-resistant visual productivity and cognitive triage dashboard.
@@ -1048,7 +1236,7 @@ export default function App() {
               </label>
               <input
                 type="email"
-                placeholder="developer@flowmind.com"
+                placeholder="developer@kairox.com"
                 value={authEmail}
                 onChange={(e) => setAuthEmail(e.target.value)}
                 required
@@ -1147,7 +1335,7 @@ export default function App() {
             {!sidebarCollapsed && (
               <div>
                 <h1 className="font-display font-extrabold text-base tracking-tight text-zinc-900 dark:text-white flex items-center gap-1">
-                  FlowMind
+                  Kairox
                   <span className="text-[8px] font-mono font-bold bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-500 px-1 py-0.5 rounded border border-zinc-200 dark:border-zinc-800">
                     AI
                   </span>
@@ -1297,6 +1485,14 @@ export default function App() {
                   <BellOff className="w-4 h-4 text-zinc-400" />
                 )}
               </button>
+
+              <button
+                onClick={handleExportData}
+                className="p-2 bg-zinc-100 dark:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-900 transition-all cursor-pointer text-zinc-400 hover:text-indigo-500"
+                title="Export Productivity Data as JSON"
+              >
+                <Download className="w-4 h-4 text-indigo-400" />
+              </button>
             </div>
           ) : (
             <>
@@ -1349,6 +1545,20 @@ export default function App() {
                   {notificationsEnabled ? 'ON' : 'OFF'}
                 </span>
               </button>
+
+              <div className="flex items-center justify-between p-1 bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl">
+                <span className="text-[10px] text-zinc-500 pl-2 font-mono flex items-center gap-1.5">
+                  <Download className="w-3.5 h-3.5 text-indigo-500" />
+                  {lang === 'en' ? 'Export Data' : 'Export Karein'}
+                </span>
+                <button
+                  onClick={handleExportData}
+                  className="px-2 py-0.5 text-[9px] font-mono font-bold bg-indigo-650 hover:bg-indigo-700 text-white rounded-lg transition-all cursor-pointer shadow-sm flex items-center gap-1 font-semibold"
+                >
+                  <Download className="w-2.5 h-2.5" />
+                  <span>JSON</span>
+                </button>
+              </div>
             </>
           )}
 
@@ -1413,7 +1623,7 @@ export default function App() {
             <div className={`p-1.5 rounded-lg text-white bg-gradient-to-tr ${currentPersonality.bgGradientClass}`}>
               <BrainCircuit className="w-4 h-4" />
             </div>
-            <h1 className="font-display font-bold text-sm tracking-tight text-zinc-900 dark:text-white">FlowMind</h1>
+            <h1 className="font-display font-bold text-sm tracking-tight text-zinc-900 dark:text-white">Kairox</h1>
           </div>
 
           <div className="hidden sm:flex items-center gap-2">
@@ -1470,7 +1680,7 @@ export default function App() {
                     <Sparkles className="w-7 h-7 relative" />
                   </div>
                   <h2 className="font-sans font-black text-4xl sm:text-5xl text-zinc-900 dark:text-white tracking-tight mb-3">
-                    Meet <span className="bg-gradient-to-r from-indigo-500 via-purple-500 to-violet-500 bg-clip-text text-transparent">FlowMind</span>
+                    Meet <span className="bg-gradient-to-r from-indigo-500 via-purple-500 to-violet-500 bg-clip-text text-transparent">Kairox</span>
                   </h2>
                   <p className="text-sm sm:text-base text-zinc-500 dark:text-zinc-400 max-w-lg mx-auto leading-relaxed">
                     A professional, high-fidelity productivity companion designed to completely eliminate task resistance, break anxiety loops, and guarantee you never miss a deadline.
@@ -1519,12 +1729,22 @@ export default function App() {
                 {/* Tactical Slide to Unlock / Metaphorical Slider */}
                 <div className="space-y-4 text-center mt-6">
                   <div className="max-w-md mx-auto">
-                    <SlideToUnlock onUnlocked={() => setOnboardingStep('quiz')} />
+                    <SlideToUnlock onUnlocked={() => {
+                      if (localStorage.getItem('kairox_tutorial_completed') === 'true') {
+                        setOnboardingStep('quiz');
+                      } else {
+                        setOnboardingStep('tutorial');
+                      }
+                    }} />
                   </div>
                   <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-mono tracking-wider uppercase">
                     Slide to activate focus & select companion
                   </p>
                 </div>
+              </div>
+            ) : onboardingStep === 'tutorial' ? (
+              <div className="max-w-2xl mx-auto py-4">
+                <TutorialOverlay onComplete={() => setOnboardingStep('quiz')} />
               </div>
             ) : (
               <div className="max-w-2xl mx-auto py-8">
@@ -1804,6 +2024,14 @@ export default function App() {
                       </div>
                     </div>
                   </div>
+
+                  {/* Focus Session History Section */}
+                  <FocusHistory 
+                    sessions={focusSessions}
+                    onClearHistory={() => setFocusSessions([])}
+                    lang={lang}
+                  />
+
                 </div>
               </div>
 
@@ -2231,7 +2459,7 @@ export default function App() {
                       <button 
                         onClick={() => {
                           setCompletedPomodoros(0);
-                          localStorage.setItem('flowmind_pomodoros', '0');
+                          localStorage.setItem('kairos_pomodoros', '0');
                         }}
                         className="mt-3 text-[11px] font-medium font-sans text-zinc-500 hover:text-zinc-300 w-full text-center transition-colors px-3 py-1.5 border border-zinc-800 rounded-lg bg-zinc-900/30 hover:bg-zinc-800/50"
                       >
@@ -2246,6 +2474,8 @@ export default function App() {
               <div style={{ display: activeTab === 'calendar' ? 'block' : 'none' }}>
                 <div className="max-w-4xl mx-auto animate-in fade-in duration-200">
                   <CalendarDashboard 
+                    tasks={tasks}
+                    onImportEventAsTask={handleImportCalendarEventAsTask}
                     accentColor={accentColor}
                     borderColor={borderColor}
                     textColor={textColor}
@@ -2289,7 +2519,12 @@ export default function App() {
             };
             setTasks(prev => [newTask, ...prev]);
             handleTabChange('planner');
-            alert(`Saved target "${title}" to your planner targets!`);
+            
+            if (newTask.dueDate) {
+              handleSyncTaskToCalendar(newTask, true);
+            } else {
+              alert(`Saved target "${title}" to your planner targets!`);
+            }
           }}
           accentColor={accentColor}
         />
@@ -2435,14 +2670,20 @@ export default function App() {
               </span>
               <div className="flex justify-center gap-3">
                 <button
-                  onClick={() => synthManager.playZenDrone()}
+                  onClick={() => {
+                    synthManager.resume();
+                    synthManager.playZenDrone();
+                  }}
                   className="px-3.5 py-2 bg-zinc-900 hover:bg-zinc-850 text-[10px] font-semibold rounded-xl border border-zinc-800 text-zinc-300 transition-all flex items-center gap-1.5 cursor-pointer"
                 >
                   <Moon className="w-3.5 h-3.5 text-indigo-400" />
                   Zen Drone
                 </button>
                 <button
-                  onClick={() => synthManager.playLofi2()}
+                  onClick={() => {
+                    synthManager.resume();
+                    synthManager.playLofi2();
+                  }}
                   className="px-3.5 py-2 bg-zinc-900 hover:bg-zinc-850 text-[10px] font-semibold rounded-xl border border-zinc-800 text-zinc-300 transition-all flex items-center gap-1.5 cursor-pointer"
                 >
                   <Music className="w-3.5 h-3.5 text-sky-400" />
